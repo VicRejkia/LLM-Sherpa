@@ -21,8 +21,7 @@
         ".vscode",
         "node_modules",
         "venv",
-        ".env",
-        "__init__.py"
+        ".env"
     ],
     "exclude_dotfiles": true,
     "show_project_structure": true,
