@@ -42,20 +42,39 @@ class FileSystemWorker(QObject):
         finally:
             self.finished.emit()
 
-    # --- REWRITE: For AST-Powered Code Analysis ---
     def _parse_python_file(self, full_path, file_rel_path, results):
-        """Parses a Python file to find classes and functions."""
+        """
+        BUG FIX: Rewritten for robust AST parsing.
+        This version wraps the child node iteration in a try-except block to handle
+        node types that are not iterable (e.g., BinOp, Constant), fixing the console errors.
+        """
         try:
             with open(full_path, 'r', encoding='utf-8') as f:
                 source = f.read()
             tree = ast.parse(source)
             
+            node_parents = {}
             for node in ast.walk(tree):
+                # This try-except block makes the AST parsing much more robust.
+                try:
+                    for child in ast.iter_child_nodes(node):
+                        node_parents[child] = node
+                except TypeError:
+                    # Some node types like BinOp, Constant, etc., are not iterable
+                    continue
+
+            for node in ast.walk(tree):
+                parent_id = file_rel_path 
+
+                if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                    parent_node = node_parents.get(node)
+                    while parent_node:
+                        if isinstance(parent_node, ast.ClassDef):
+                            parent_id = f"{file_rel_path}::{parent_node.name}"
+                            break
+                        parent_node = node_parents.get(parent_node)
+
                 if isinstance(node, ast.ClassDef):
-                    # Find the parent of the class definition
-                    parent_id = file_rel_path
-                    # This is a simplification; nested classes would require tracking the parent class ID.
-                    
                     results.append({
                         'name': node.name, 'full_path': full_path,
                         'id': f"{file_rel_path}::{node.name}", 'parent_id': parent_id,
@@ -63,13 +82,10 @@ class FileSystemWorker(QObject):
                         'start_line': node.lineno, 'end_line': node.end_lineno
                     })
                 elif isinstance(node, ast.FunctionDef):
-                    # Find the parent of the function definition
-                    parent_id = file_rel_path
-                    # This is a simplification; methods in classes would require tracking the parent class ID.
-
+                    func_id = f"{parent_id}::{node.name}" if parent_id != file_rel_path else f"{file_rel_path}::{node.name}"
                     results.append({
                         'name': node.name, 'full_path': full_path,
-                        'id': f"{file_rel_path}::{node.name}", 'parent_id': parent_id,
+                        'id': func_id, 'parent_id': parent_id,
                         'rel_path': "", 'type': 'function', 'is_dir': False,
                         'start_line': node.lineno, 'end_line': node.end_lineno
                     })
@@ -96,22 +112,25 @@ class FileSystemWorker(QObject):
             rel_path = os.path.relpath(full_path, self.project_path).replace(os.sep, '/')
             is_dir = os.path.isdir(full_path)
 
+            # BUG FIX: Ensure correct parent_id for files in the root directory.
+            # If the current_path is the project_path, the parent is the root ('.').
+            # Otherwise, it's the relative path of the directory.
+            item_parent_id = '.' if current_path == self.project_path else os.path.relpath(current_path, self.project_path).replace(os.sep, '/')
+
             if is_dir:
                 results.append({
                     'name': name, 'full_path': full_path, 'rel_path': rel_path,
-                    'id': rel_path, 'parent_id': parent_id, 'type': 'folder', 'is_dir': True
+                    'id': rel_path, 'parent_id': item_parent_id, 'type': 'folder', 'is_dir': True
                 })
                 self._scan_directory(full_path, rel_path, results)
             else:
                 _, ext = os.path.splitext(name)
                 if ext.lower() in extension_map:
-                    # Add the file item itself
                     file_item_data = {
                         'name': name, 'full_path': full_path, 'rel_path': rel_path,
-                        'id': rel_path, 'parent_id': parent_id, 'type': 'file', 'is_dir': False
+                        'id': rel_path, 'parent_id': item_parent_id, 'type': 'file', 'is_dir': False
                     }
                     results.append(file_item_data)
-                    # If it's a Python file, parse it for functions and classes
                     if ext.lower() == '.py':
                         self._parse_python_file(full_path, rel_path, results)
 
