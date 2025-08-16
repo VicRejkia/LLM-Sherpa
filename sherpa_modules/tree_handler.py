@@ -12,11 +12,16 @@ def get_tree_state(main_window):
             item_data = item.data(Qt.UserRole)
             if item_data:
                 item_id = item_data.get('id')
+                # Capture checked state for any checked or partially checked item
                 if item.checkState() in (Qt.CheckState.Checked, Qt.CheckState.PartiallyChecked):
                     checked_ids.append(item_id)
+                # Separately, capture the expanded state
                 if item.hasChildren() and main_window.tree_view.isExpanded(item.index()):
                     expanded_ids.append(item_id)
-                    recurse(item)
+            
+            # Always recurse into children to find all checked items, regardless of expansion
+            if item.hasChildren():
+                recurse(item)
     
     recurse(root)
     return {"checked": checked_ids, "expanded": expanded_ids}
@@ -100,3 +105,6 @@ def on_item_changed(main_window, item):
     
     main_window._is_updating_checks = False
     main_window.update_token_count()
+    
+    if not main_window._is_loading_project:
+        main_window._save_project_state()

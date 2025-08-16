@@ -40,6 +40,7 @@ class ProjectDocumenter(QMainWindow):
         self.config_manager = ConfigManager()
         self.project_path = ""
         self._is_updating_checks = False
+        self._is_loading_project = False # Flag to prevent saving during load
 
         self.worker = None
         self.worker_thread = None
@@ -148,9 +149,18 @@ class ProjectDocumenter(QMainWindow):
         self.key_files_table.setHorizontalHeaderLabels(["File", "Role/Description"])
         self.key_files_table.horizontalHeader().setStretchLastSection(True)
         components_layout.addWidget(self.key_files_table, 1)
+        
+        key_files_button_layout = QHBoxLayout()
         btn_add_files_to_table = QPushButton("Add Selected Files from Tree")
         btn_add_files_to_table.clicked.connect(self._populate_key_files_table)
-        components_layout.addWidget(btn_add_files_to_table)
+        key_files_button_layout.addWidget(btn_add_files_to_table)
+        
+        btn_remove_files_from_table = QPushButton("Remove Selected File(s)")
+        btn_remove_files_from_table.clicked.connect(self._remove_selected_key_files)
+        key_files_button_layout.addWidget(btn_remove_files_from_table)
+        key_files_button_layout.addStretch()
+
+        components_layout.addLayout(key_files_button_layout)
         self.prompt_tabs.addTab(components_tab, "🧩 Components")
 
         preview_tab = QWidget()
@@ -214,19 +224,22 @@ class ProjectDocumenter(QMainWindow):
     def _update_prompt_preview_and_tokens(self):
         self._update_prompt_preview()
         self.update_token_count()
+        if not self._is_loading_project:
+            self._save_project_state()
 
     def _assemble_prompt(self):
         objective = self.objective_text_edit.toPlainText().strip()
-        key_files = []
-        for row in range(self.key_files_table.rowCount()):
-            file_item = self.key_files_table.item(row, 0)
-            role_item = self.key_files_table.item(row, 1)
-            if file_item and role_item and file_item.text() and role_item.text():
-                key_files.append(f"- **{file_item.text().strip()}**: {role_item.text().strip()}")
-        
         components_text = ""
-        if key_files:
-            components_text = "### Key Files Overview\n" + "\n".join(key_files) + "\n\n"
+        
+        # key_files = []
+        # for row in range(self.key_files_table.rowCount()):
+        #     file_item = self.key_files_table.item(row, 0)
+        #     role_item = self.key_files_table.item(row, 1)
+        #     if file_item and role_item and file_item.text() and role_item.text():
+        #         key_files.append(f"- **{file_item.text().strip()}**: {role_item.text().strip()}")
+        
+        # if key_files:
+        #     components_text = "### Key Files Overview\n" + "\n".join(key_files) + "\n\n"
         
         master_template = self.settings_manager.get("master_prompt_template", "{objective}\n\n{components}")
         return master_template.format(objective=objective, components=components_text).strip()
@@ -262,6 +275,20 @@ class ProjectDocumenter(QMainWindow):
             self.key_files_table.setItem(row_count, 0, QTableWidgetItem(file_path))
             self.key_files_table.setItem(row_count, 1, QTableWidgetItem(""))
         self.key_files_table.resizeColumnsToContents()
+        self._save_project_state()
+
+    @Slot()
+    def _remove_selected_key_files(self):
+        """Removes the selected rows from the key_files_table."""
+        selected_rows = sorted(list(set(index.row() for index in self.key_files_table.selectedIndexes())), reverse=True)
+        if not selected_rows:
+            QMessageBox.information(self, "Info", "Select a file in the table to remove.")
+            return
+        
+        for row in selected_rows:
+            self.key_files_table.removeRow(row)
+        
+        self._save_project_state()
 
     def update_token_count(self):
         prompt_chars = len(self._assemble_prompt())
@@ -307,7 +334,7 @@ class ProjectDocumenter(QMainWindow):
         if folder: self.load_project(folder)
 
     def load_project(self, path):
-        # BUG FIX: Check if the worker_thread object exists before trying to access it.
+        self._is_loading_project = True
         if self.worker_thread and self.worker_thread.isRunning():
             self.worker.stop()
             self.worker_thread.quit()
@@ -319,7 +346,8 @@ class ProjectDocumenter(QMainWindow):
         self.tree_model.clear(); self.tree_model.setHorizontalHeaderLabels(['Name', 'Type', 'Path'])
         self.key_files_table.setRowCount(0)
         self.log_text_edit.clear()
-        self.config_manager.add_recent_project(self.project_path); self.config_manager.save_config(); self.update_recent_projects_menu()
+        self.config_manager.add_recent_project(self.project_path)
+        self.update_recent_projects_menu()
         
         self.set_ui_enabled(False); self.loading_status_label.setText("Scanning project files...")
         QApplication.processEvents()
@@ -336,7 +364,6 @@ class ProjectDocumenter(QMainWindow):
         self.worker.finished.connect(self.worker_thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-        # BUG FIX: Use a dedicated slot to clear python references to prevent access to deleted C++ objects
         self.worker_thread.finished.connect(self._on_worker_finished)
         
         self.worker_thread.start()
@@ -388,6 +415,7 @@ class ProjectDocumenter(QMainWindow):
                 tree_handler.restore_tree_state(self)
             self._restore_component_roles()
         self.update_token_count()
+        self._is_loading_project = False
 
     def set_ui_enabled(self, enabled):
         is_project_loaded = bool(self.project_path)
@@ -439,7 +467,7 @@ class ProjectDocumenter(QMainWindow):
         for row in range(self.key_files_table.rowCount()):
             file_item = self.key_files_table.item(row, 0)
             role_item = self.key_files_table.item(row, 1)
-            if file_item and role_item and file_item.text() and role_item.text():
+            if file_item and role_item and file_item.text():
                 roles[file_item.text().strip()] = role_item.text().strip()
         return roles
 
@@ -454,18 +482,28 @@ class ProjectDocumenter(QMainWindow):
             self.key_files_table.setItem(row_count, 1, QTableWidgetItem(role))
         self.key_files_table.resizeColumnsToContents()
 
+    def _save_project_state(self):
+        """Saves the current state of the tree and component roles for the current project."""
+        if not self.project_path or not self.settings_manager.get("restore_tree_selection"):
+            return
+        
+        tree_states = self.config_manager.get("tree_states", {})
+        current_state = tree_handler.get_tree_state(self)
+        current_state["component_roles"] = self._get_component_roles()
+        tree_states[self.project_path] = current_state
+        
+        self.config_manager.set("tree_states", tree_states)
+        self.config_manager.save_config()
+
     def closeEvent(self, event):
         if self.worker_thread and self.worker_thread.isRunning():
             self.worker.stop(); self.worker_thread.quit(); self.worker_thread.wait()
         if self.project_path:
-            if self.settings_manager.get("remember_project_path"): self.config_manager.set("last_project_path", self.project_path)
-            if self.settings_manager.get("restore_tree_selection"):
-                tree_states = self.config_manager.get("tree_states", {})
-                current_state = tree_handler.get_tree_state(self)
-                current_state["component_roles"] = self._get_component_roles()
-                tree_states[self.project_path] = current_state
-                self.config_manager.set("tree_states", tree_states)
-        self.config_manager.save_config(); event.accept()
+            if self.settings_manager.get("remember_project_path"): 
+                self.config_manager.set("last_project_path", self.project_path)
+            self._save_project_state()
+        self.config_manager.save_config()
+        event.accept()
 
     @Slot()
     def on_tree_selection_changed(self, selected, deselected):
