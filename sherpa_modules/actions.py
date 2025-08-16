@@ -1,24 +1,86 @@
 import os
 import re
+from io import StringIO
 from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtCore import Qt
 from .content_utils import get_checked_content, generate_tree_structure, generate_preamble
 from .ui import SettingsWindow
 
-def generate_markdown_action(main_window):
-    """Handles the entire process of generating the final context.md file."""
+def assemble_full_markdown(main_window):
+    """Assembles the complete markdown content as a string for preview or saving."""
     prompt_text = main_window._assemble_prompt()
     selected_content = get_checked_content(main_window)
     log_content = main_window.log_text_edit.toPlainText().strip()
+    component_roles = main_window._get_component_roles()
+    project_name = os.path.basename(main_window.project_path) if main_window.project_path else "Project"
 
-    # Check if there's absolutely nothing to include
-    if not selected_content and not prompt_text and not log_content:
+    has_any_context = bool(selected_content or log_content)
+
+    with StringIO() as f:
+        # 1. Objective (only if it exists)
+        if prompt_text:
+            f.write(f"# 🎯 Objective\n\n{prompt_text}\n\n")
+            if has_any_context:
+                f.write("---\n\n")
+
+        # Stop here if there's nothing else to add
+        if not has_any_context:
+            return f.getvalue()
+
+        # 2. Project Context section
+        f.write(f"## 📚 Project Context: `{project_name}`\n\n")
+
+        # Preamble
+        if main_window.preamble_checkbox.isChecked() and selected_content:
+            preamble = generate_preamble(selected_content)
+            f.write(preamble + "\n\n")
+
+        section_counter = 1
+
+        # Console Log / Error Output (only if it exists)
+        if log_content:
+            f.write(f"### {section_counter}. Console Log / Error Output\n\n```\n{log_content}\n```\n\n")
+            section_counter += 1
+
+        # Project Structure (only if enabled and files are selected)
+        if main_window.settings_manager.get("show_project_structure") and selected_content:
+            paths = [c['rel_path'] for c in selected_content]
+            tree = generate_tree_structure(paths)
+            f.write(f"### {section_counter}. Project Structure\n\n```\n{tree}\n```\n\n")
+            section_counter += 1
+
+        # File Contents (only if files are selected)
+        if selected_content:
+            f.write(f"### {section_counter}. File Contents\n\n")
+            ext_map = main_window.settings_manager.get("extension_map")
+            for code_file in sorted(selected_content, key=lambda x: x['rel_path']):
+                filename = os.path.basename(code_file['full_path'])
+                rel_path = code_file['rel_path'].replace(os.sep, '/')
+                lang = ext_map.get(os.path.splitext(filename)[1].lower(), "")
+
+                f.write(f"#### 📄 `{filename}`\n")
+                if rel_path in component_roles:
+                    f.write(f"**Role:** {component_roles[rel_path]}\n\n")
+                f.write(f"*path: `{rel_path}`*\n\n")
+
+                content = code_file['content'].strip()
+                if content == "":
+                    f.write("_This file is empty._\n\n")
+                else:
+                    f.write(f"```{lang}\n{content}\n```\n\n")
+        
+        return f.getvalue()
+
+def generate_markdown_action(main_window):
+    """Handles generating and saving the final context.md file."""
+    markdown_content = assemble_full_markdown(main_window).strip()
+    
+    if not markdown_content:
         QMessageBox.information(main_window, "Info", "Nothing to generate.")
         return
 
-    component_roles = main_window._get_component_roles()
-
     # Prompt user for save location
-    project_name = os.path.basename(main_window.project_path)
+    project_name = os.path.basename(main_window.project_path) if main_window.project_path else "Project"
     default_filename = f"{project_name}_context.md"
     output_file, _ = QFileDialog.getSaveFileName(
         main_window,
@@ -31,60 +93,7 @@ def generate_markdown_action(main_window):
 
     try:
         with open(output_file, "w", encoding="utf-8") as f:
-            # Write Objective if present
-            if prompt_text:
-                f.write(f"# 🎯 Objective\n\n{prompt_text}\n\n---\n\n")
-            else:
-                f.write("# 🎯 Objective\n\n*No objective provided.*\n\n---\n\n")
-
-            # Project Context Header
-            f.write(f"## 📚 Project Context: `{project_name}`\n\n")
-
-            # Add preamble if enabled and content exists
-            if main_window.preamble_checkbox.isChecked() and selected_content:
-                preamble = generate_preamble(selected_content)
-                f.write(preamble + "\n\n")
-
-            section_counter = 1
-
-            # Console Log / Error Output
-            if log_content:
-                f.write(f"### {section_counter}. Console Log / Error Output\n\n```\n{log_content}\n```\n\n")
-            else:
-                f.write(f"### {section_counter}. Console Log / Error Output\n\n*No log output provided.*\n\n")
-            section_counter += 1
-
-            # Project Structure
-            if main_window.settings_manager.get("show_project_structure") and selected_content:
-                paths = [c['rel_path'] for c in selected_content]
-                tree = generate_tree_structure(paths)
-                f.write(f"### {section_counter}. Project Structure\n\n```\n{tree}\n```\n\n")
-            else:
-                f.write(f"### {section_counter}. Project Structure\n\n*Structure not included or no files selected.*\n\n")
-            section_counter += 1
-
-            # File Contents
-            f.write(f"### {section_counter}. File Contents\n\n")
-            if not selected_content:
-                f.write("*No files were selected for inclusion.*\n\n")
-            else:
-                ext_map = main_window.settings_manager.get("extension_map")
-                for code_file in sorted(selected_content, key=lambda x: x['rel_path']):
-                    filename = os.path.basename(code_file['full_path'])
-                    rel_path = code_file['rel_path'].replace(os.sep, '/')
-                    lang = ext_map.get(os.path.splitext(filename)[1].lower(), "")
-
-                    f.write(f"#### 📄 `{filename}`\n")
-                    if rel_path in component_roles:
-                        f.write(f"**Role:** {component_roles[rel_path]}\n\n")
-                    f.write(f"*path: `{rel_path}`*\n\n")
-
-                    content = code_file['content'].strip()
-                    if content == "":
-                        f.write("_This file is empty._\n\n")
-                    else:
-                        f.write(f"```{lang}\n{content}\n```\n\n")
-
+            f.write(markdown_content)
         QMessageBox.information(main_window, "Success", f"Context file generated at:\n{output_file}")
     except Exception as e:
         QMessageBox.critical(main_window, "Error", f"Failed to generate documentation:\n{str(e)}")
@@ -106,20 +115,26 @@ def toggle_all_selections_action(main_window):
     """Checks or unchecks all top-level items in the project tree."""
     root = main_window.tree_model.invisibleRootItem()
     if root.rowCount() > 0:
-        is_all_checked = all(root.child(i, 0).checkState() == Qt.CheckState.Checked for i in range(root.rowCount()))
-        new_state = Qt.CheckState.Unchecked if is_all_checked else Qt.CheckState.Checked
+        # Determine the target state based on whether at least one item is unchecked.
+        # If all are fully checked, the new state is Unchecked. Otherwise, it's Checked.
+        is_any_not_fully_checked = any(root.child(i, 0).checkState() != Qt.CheckState.Checked for i in range(root.rowCount()))
+        new_state = Qt.CheckState.Checked if is_any_not_fully_checked else Qt.CheckState.Unchecked
+        
+        main_window._is_updating_checks = True
         for i in range(root.rowCount()):
             item = root.child(i, 0)
             if item:
-                # Use the tree_handler function to ensure hierarchical checking
-                from . import tree_handler
+                from . import tree_handler # Local import to avoid circular dependency at module level
                 tree_handler.set_children_check_state(item, new_state)
-
+        main_window._is_updating_checks = False
+        
+        # Manually trigger the update after batch changes
+        main_window._on_content_changed()
 
 def clean_logs_timestamps_action(text_edit):
     """Removes timestamps from the log text."""
     text = text_edit.toPlainText()
-    pattern = re.compile(r"^\s*(?:\[.*?\])?\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?Z?\s*-?\s*", re.MULTILINE)
+    pattern = re.compile(r"^\s*(?:\[.*?\])?\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?Z?\s*-?\s*", re.MULTLINE)
     text = pattern.sub('', text)
     text = "\n".join(line for line in text.splitlines() if line.strip())
     text_edit.setPlainText(text.strip())

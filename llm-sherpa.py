@@ -113,9 +113,19 @@ class ProjectDocumenter(QMainWindow):
         log_layout.addWidget(self.log_text_edit)
         self.main_tabs.addTab(log_tab_widget, "📋 Logs / Console")
 
+        # --- New Markdown Preview Tab ---
+        self.markdown_preview_tab = QWidget()
+        markdown_preview_layout = QVBoxLayout(self.markdown_preview_tab)
+        markdown_preview_layout.addWidget(QLabel("<b>Final Markdown Preview:</b>"))
+        self.markdown_preview_browser = QTextBrowser()
+        self.markdown_preview_browser.setReadOnly(True)
+        markdown_preview_layout.addWidget(self.markdown_preview_browser)
+        self.main_tabs.addTab(self.markdown_preview_tab, "📄 Markdown Preview")
+
+
         prompt_studio_container = QWidget()
         prompt_studio_layout = QVBoxLayout(prompt_studio_container)
-        
+
         task_selector_layout = QHBoxLayout()
         task_selector_layout.addWidget(QLabel("<b>Select a Task:</b>"))
         self.task_selector_combo = QComboBox()
@@ -128,7 +138,7 @@ class ProjectDocumenter(QMainWindow):
         self.prompt_tabs = QTabWidget()
         prompt_studio_layout.addWidget(self.prompt_tabs)
         main_splitter.addWidget(prompt_studio_container)
-        
+
         objective_tab = QWidget()
         objective_layout = QVBoxLayout(objective_tab)
         self.prompt_template_combo = QComboBox()
@@ -149,12 +159,12 @@ class ProjectDocumenter(QMainWindow):
         self.key_files_table.setHorizontalHeaderLabels(["File", "Role/Description"])
         self.key_files_table.horizontalHeader().setStretchLastSection(True)
         components_layout.addWidget(self.key_files_table, 1)
-        
+
         key_files_button_layout = QHBoxLayout()
         btn_add_files_to_table = QPushButton("Add Selected Files from Tree")
         btn_add_files_to_table.clicked.connect(self._populate_key_files_table)
         key_files_button_layout.addWidget(btn_add_files_to_table)
-        
+
         btn_remove_files_from_table = QPushButton("Remove Selected File(s)")
         btn_remove_files_from_table.clicked.connect(self._remove_selected_key_files)
         key_files_button_layout.addWidget(btn_remove_files_from_table)
@@ -162,14 +172,6 @@ class ProjectDocumenter(QMainWindow):
 
         components_layout.addLayout(key_files_button_layout)
         self.prompt_tabs.addTab(components_tab, "🧩 Components")
-
-        preview_tab = QWidget()
-        preview_layout = QVBoxLayout(preview_tab)
-        self.prompt_preview_browser = QTextBrowser()
-        self.prompt_preview_browser.setReadOnly(True)
-        preview_layout.addWidget(QLabel("<b>Assembled Prompt Preview:</b>"))
-        preview_layout.addWidget(self.prompt_preview_browser)
-        self.prompt_tabs.addTab(preview_tab, "🔍 Preview")
 
         main_splitter.setSizes([650, 300])
 
@@ -179,17 +181,18 @@ class ProjectDocumenter(QMainWindow):
         self.token_budget_combo = QComboBox(); self.token_budget_combo.addItems(["No Budget"] + list(self.settings_manager.get("llm_token_budgets", {}).keys())); self.status_bar.addPermanentWidget(self.token_budget_combo)
         self.token_progress_bar = QProgressBar(); self.token_progress_bar.setMaximumWidth(200); self.token_progress_bar.setTextVisible(False); self.status_bar.addPermanentWidget(self.token_progress_bar)
         self.token_count_label = QLabel("Size: ~0 tokens"); self.status_bar.addPermanentWidget(self.token_count_label)
-    
+
     def _connect_signals(self):
         self.tree_view.selectionModel().selectionChanged.connect(self.on_tree_selection_changed)
         self.tree_model.itemChanged.connect(self.on_item_changed)
-        self.log_text_edit.textChanged.connect(self._update_prompt_preview_and_tokens)
-        self.objective_text_edit.textChanged.connect(self._update_prompt_preview_and_tokens)
-        self.key_files_table.itemChanged.connect(self._update_prompt_preview_and_tokens)
+        self.log_text_edit.textChanged.connect(self._on_content_changed)
+        self.objective_text_edit.textChanged.connect(self._on_content_changed)
+        self.key_files_table.itemChanged.connect(self._on_content_changed)
         self.task_selector_combo.currentTextChanged.connect(self._on_task_selected)
         self.prompt_template_combo.activated.connect(self.apply_prompt_template)
         self.token_budget_combo.currentTextChanged.connect(self.update_token_count)
-    
+        self.preamble_checkbox.stateChanged.connect(self._on_content_changed)
+
     # --- Action Slots (Delegating to modules) ---
     @Slot()
     def generate_markdown(self):
@@ -214,46 +217,38 @@ class ProjectDocumenter(QMainWindow):
     @Slot()
     def collapse_duplicates(self):
         actions.collapse_duplicates_action(self.log_text_edit)
-    
+
     @Slot(QStandardItem)
     def on_item_changed(self, item):
         tree_handler.on_item_changed(self, item)
 
     # --- UI Update and Helper Methods ---
     @Slot()
-    def _update_prompt_preview_and_tokens(self):
-        self._update_prompt_preview()
+    def _on_content_changed(self):
+        """Central hub for updating UI elements when content changes."""
         self.update_token_count()
+        self._update_markdown_preview()
         if not self._is_loading_project:
             self._save_project_state()
 
     def _assemble_prompt(self):
         objective = self.objective_text_edit.toPlainText().strip()
         components_text = ""
-        
-        # key_files = []
-        # for row in range(self.key_files_table.rowCount()):
-        #     file_item = self.key_files_table.item(row, 0)
-        #     role_item = self.key_files_table.item(row, 1)
-        #     if file_item and role_item and file_item.text() and role_item.text():
-        #         key_files.append(f"- **{file_item.text().strip()}**: {role_item.text().strip()}")
-        
-        # if key_files:
-        #     components_text = "### Key Files Overview\n" + "\n".join(key_files) + "\n\n"
-        
         master_template = self.settings_manager.get("master_prompt_template", "{objective}\n\n{components}")
         return master_template.format(objective=objective, components=components_text).strip()
 
     @Slot()
-    def _update_prompt_preview(self):
-        self.prompt_preview_browser.setPlainText(self._assemble_prompt())
+    def _update_markdown_preview(self):
+        """Generates and displays the full markdown preview."""
+        markdown_content = actions.assemble_full_markdown(self)
+        self.markdown_preview_browser.setMarkdown(markdown_content)
 
     @Slot(str)
     def _on_task_selected(self, task_name):
         task_data = self.settings_manager.get("prompt_modules", {}).get(task_name, {})
         self.objective_text_edit.setPlainText(task_data.get("objective", ""))
         self.main_tabs.setCurrentIndex(1 if task_data.get("focus_tab") == "Logs / Console" else 0)
-        self._update_prompt_preview()
+        self._on_content_changed()
 
     @Slot()
     def _populate_key_files_table(self):
@@ -268,7 +263,7 @@ class ProjectDocumenter(QMainWindow):
             for item in [self.tree_model.itemFromIndex(index)]
             if item.data(Qt.UserRole) and item.data(Qt.UserRole).get('type') == 'file'
         }
-        
+
         for file_path in sorted(list(files_to_add)):
             row_count = self.key_files_table.rowCount()
             self.key_files_table.insertRow(row_count)
@@ -284,10 +279,10 @@ class ProjectDocumenter(QMainWindow):
         if not selected_rows:
             QMessageBox.information(self, "Info", "Select a file in the table to remove.")
             return
-        
+
         for row in selected_rows:
             self.key_files_table.removeRow(row)
-        
+
         self._save_project_state()
 
     def update_token_count(self):
@@ -340,7 +335,7 @@ class ProjectDocumenter(QMainWindow):
             self.worker_thread.quit()
             if not self.worker_thread.wait(5000):
                 print("Warning: Worker thread did not terminate gracefully.")
-        
+
         self.project_path = get_long_path_name(path)
         self.setWindowTitle(f"LLM-Sherpa - {os.path.basename(self.project_path)}")
         self.tree_model.clear(); self.tree_model.setHorizontalHeaderLabels(['Name', 'Type', 'Path'])
@@ -348,24 +343,24 @@ class ProjectDocumenter(QMainWindow):
         self.log_text_edit.clear()
         self.config_manager.add_recent_project(self.project_path)
         self.update_recent_projects_menu()
-        
+
         self.set_ui_enabled(False); self.loading_status_label.setText("Scanning project files...")
         QApplication.processEvents()
-        
+
         self.worker_thread = QThread(self)
         self.worker = FileSystemWorker(self.project_path, self.settings_manager.settings)
         self.worker.moveToThread(self.worker_thread)
-        
+
         self.worker_thread.started.connect(self.worker.run)
         self.worker.results_ready.connect(self.populate_tree_from_data)
         self.worker.error.connect(self.on_loading_error)
-        
+
         # Connect finished signals for proper cleanup
         self.worker.finished.connect(self.worker_thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.worker_thread.finished.connect(self._on_worker_finished)
-        
+
         self.worker_thread.start()
 
     @Slot()
@@ -380,16 +375,16 @@ class ProjectDocumenter(QMainWindow):
         path_to_item_map = {'.': self.tree_model.invisibleRootItem()}
         folder_icon = self.style().standardIcon(QStyle.SP_DirIcon); file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
         py_icon = QIcon.fromTheme("text-x-python", file_icon); class_icon = QIcon.fromTheme("x-office-document", file_icon); func_icon = QIcon.fromTheme("utilities-terminal", file_icon)
-        
+
         for item_data in items_data:
             parent_item = path_to_item_map.get(item_data['parent_id'])
             if parent_item is None: continue
-            
+
             name_item = QStandardItem(item_data['name']); name_item.setCheckable(True); name_item.setEditable(False)
             name_item.setData(item_data, Qt.UserRole)
             type_item = QStandardItem(item_data['type']); type_item.setEditable(False)
             rel_path_item = QStandardItem(item_data['rel_path']); rel_path_item.setEditable(False)
-            
+
             icon = file_icon
             if item_data['type'] == 'folder': icon = folder_icon
             elif os.path.splitext(item_data['name'])[-1].lower() == '.py': icon = py_icon
@@ -399,7 +394,7 @@ class ProjectDocumenter(QMainWindow):
 
             parent_item.appendRow([name_item, type_item, rel_path_item if item_data['type'] != 'function' else QStandardItem("")])
             path_to_item_map[item_data['id']] = name_item
-        
+
         self.on_loading_finished()
         QTimer.singleShot(0, lambda: self.tree_view.header().resizeSection(0, 400))
 
@@ -414,7 +409,7 @@ class ProjectDocumenter(QMainWindow):
             if self.settings_manager.get("restore_tree_selection"):
                 tree_handler.restore_tree_state(self)
             self._restore_component_roles()
-        self.update_token_count()
+        self._on_content_changed() # Initial update
         self._is_loading_project = False
 
     def set_ui_enabled(self, enabled):
@@ -486,12 +481,12 @@ class ProjectDocumenter(QMainWindow):
         """Saves the current state of the tree and component roles for the current project."""
         if not self.project_path or not self.settings_manager.get("restore_tree_selection"):
             return
-        
+
         tree_states = self.config_manager.get("tree_states", {})
         current_state = tree_handler.get_tree_state(self)
         current_state["component_roles"] = self._get_component_roles()
         tree_states[self.project_path] = current_state
-        
+
         self.config_manager.set("tree_states", tree_states)
         self.config_manager.save_config()
 
@@ -499,7 +494,7 @@ class ProjectDocumenter(QMainWindow):
         if self.worker_thread and self.worker_thread.isRunning():
             self.worker.stop(); self.worker_thread.quit(); self.worker_thread.wait()
         if self.project_path:
-            if self.settings_manager.get("remember_project_path"): 
+            if self.settings_manager.get("remember_project_path"):
                 self.config_manager.set("last_project_path", self.project_path)
             self._save_project_state()
         self.config_manager.save_config()
@@ -512,7 +507,7 @@ class ProjectDocumenter(QMainWindow):
         item = self.tree_model.itemFromIndex(indexes[0])
         item_data = item.data(Qt.UserRole)
         if not item_data or item_data.get('type') == 'folder': self.code_preview.clear(); return
-        
+
         code = content_utils.get_code_from_item(item_data)
         if PYGMENTS_AVAILABLE:
             try:
@@ -531,6 +526,7 @@ class ProjectDocumenter(QMainWindow):
         template_name = self.prompt_template_combo.currentText()
         if template_name != "Custom Prompt":
             self.objective_text_edit.setPlainText(self.settings_manager.get("prompt_templates", {}).get(template_name, ""))
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

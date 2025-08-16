@@ -104,7 +104,6 @@ def on_item_changed(main_window, item):
     update_ancestor_check_state(item)
     
     main_window._is_updating_checks = False
-    main_window.update_token_count()
     
-    if not main_window._is_loading_project:
-        main_window._save_project_state()
+    # This single call now handles updating tokens, the markdown preview, and saving the project state.
+    main_window._on_content_changed()
