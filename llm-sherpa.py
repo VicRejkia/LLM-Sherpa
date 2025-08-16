@@ -217,16 +217,16 @@ class ProjectDocumenter(QMainWindow):
 
     def _assemble_prompt(self):
         objective = self.objective_text_edit.toPlainText().strip()
-        # key_files = []
-        # for row in range(self.key_files_table.rowCount()):
-        #     file_item = self.key_files_table.item(row, 0)
-        #     role_item = self.key_files_table.item(row, 1)
-        #     if file_item and role_item and file_item.text() and role_item.text():
-        #         key_files.append(f"- **{file_item.text().strip()}**: {role_item.text().strip()}")
+        key_files = []
+        for row in range(self.key_files_table.rowCount()):
+            file_item = self.key_files_table.item(row, 0)
+            role_item = self.key_files_table.item(row, 1)
+            if file_item and role_item and file_item.text() and role_item.text():
+                key_files.append(f"- **{file_item.text().strip()}**: {role_item.text().strip()}")
         
         components_text = ""
-        # if key_files:
-        #     components_text = "### Key Files Overview\n" + "\n".join(key_files) + "\n\n"
+        if key_files:
+            components_text = "### Key Files Overview\n" + "\n".join(key_files) + "\n\n"
         
         master_template = self.settings_manager.get("master_prompt_template", "{objective}\n\n{components}")
         return master_template.format(objective=objective, components=components_text).strip()
