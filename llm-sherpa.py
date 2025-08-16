@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import re
+import xml.etree.ElementTree as ET
 from functools import partial
 
 # --- PySide6 Imports ---
@@ -9,7 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTreeView, QTextEdit, QFileDialog, QMessageBox,
     QLabel, QStatusBar, QTextBrowser, QToolBar, QStyle,
     QHeaderView, QSplitter, QTabWidget, QComboBox, QProgressBar,
-    QTableWidget, QTableWidgetItem, QCheckBox
+    QTableWidget, QTableWidgetItem, QCheckBox, QScrollArea, QFormLayout
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QFont
 from PySide6.QtCore import Qt, Slot, QThread, QTimer
@@ -17,7 +19,7 @@ from PySide6.QtCore import Qt, Slot, QThread, QTimer
 # --- Local Module Imports ---
 from sherpa_modules.config import SettingsManager, ConfigManager
 from sherpa_modules.worker import FileSystemWorker, get_long_path_name
-from sherpa_modules.ui import WelcomeDialog, IterativeRefinementDialog, TDDWizard
+from sherpa_modules.ui import WelcomeDialog
 from sherpa_modules import actions, tree_handler, content_utils
 
 # --- Live Code Preview Dependency Check ---
@@ -33,14 +35,17 @@ except ImportError:
 class ProjectDocumenter(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LLM-Sherpa - Project Documenter v3.4")
+        self.setWindowTitle("LLM-Sherpa - Project Documenter v4.0")
         self.setGeometry(100, 100, 1400, 950)
 
         self.settings_manager = SettingsManager()
         self.config_manager = ConfigManager()
         self.project_path = ""
         self._is_updating_checks = False
-        self._is_loading_project = False # Flag to prevent saving during load
+        self._is_loading_project = False
+        self.prompt_templates = {}
+        self.master_template = ""
+        self.prompt_module_widgets = {}
 
         self.worker = None
         self.worker_thread = None
@@ -50,9 +55,49 @@ class ProjectDocumenter(QMainWindow):
             formatter = HtmlFormatter(style='monokai')
             self.pygments_css = formatter.get_style_defs('.highlight')
 
+        self.load_prompt_templates()
         self.init_ui()
         self._connect_signals()
         QTimer.singleShot(0, self.show_welcome_or_load_project)
+
+    def load_prompt_templates(self):
+        try:
+            # Determine the base directory of the application
+            if getattr(sys, 'frozen', False):
+                # The application is frozen (e.g., packaged with PyInstaller)
+                script_dir = os.path.dirname(sys.executable)
+            else:
+                # The application is running from a script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+
+            templates_path = os.path.join(script_dir, 'templates', 'prompt_templates.xml')
+            
+            if not os.path.exists(templates_path):
+                QMessageBox.critical(self, "Template Error", f"File not found: 'prompt_templates.xml'.\n\nPlease ensure the 'templates' folder exists in the same directory as the application and contains this file.")
+                return
+
+            tree = ET.parse(templates_path)
+            root = tree.getroot()
+            self.master_template = root.find('master_template').text.strip()
+            for template_node in root.findall('template'):
+                template_name = template_node.get('name')
+                # MODIFICATION: Use a list of dicts to preserve module order from XML
+                modules = [
+                    {
+                        'name': module.get('name'),
+                        'text': module.text.strip() if module.text else "",
+                        'type': module.get('type', 'line'),
+                        'editable': module.get('editable') == 'true'
+                    }
+                    for module in template_node.findall('module')
+                ]
+                self.prompt_templates[template_name] = modules
+        except ET.ParseError as e:
+            QMessageBox.critical(self, "Template Error", f"Failed to parse 'prompt_templates.xml':\n\n{e}")
+            self.master_template = "Error: Master template could not be loaded."
+            self.prompt_templates = {"Error": {}}
+        except Exception as e:
+            QMessageBox.critical(self, "Initialization Error", f"An unexpected error occurred while loading templates:\n\n{e}")
 
     def init_ui(self):
         central_widget = QWidget()
@@ -113,7 +158,6 @@ class ProjectDocumenter(QMainWindow):
         log_layout.addWidget(self.log_text_edit)
         self.main_tabs.addTab(log_tab_widget, "📋 Logs / Console")
 
-        # --- New Markdown Preview Tab ---
         self.markdown_preview_tab = QWidget()
         markdown_preview_layout = QVBoxLayout(self.markdown_preview_tab)
         markdown_preview_layout.addWidget(QLabel("<b>Final Markdown Preview:</b>"))
@@ -122,39 +166,56 @@ class ProjectDocumenter(QMainWindow):
         markdown_preview_layout.addWidget(self.markdown_preview_browser)
         self.main_tabs.addTab(self.markdown_preview_tab, "📄 Markdown Preview")
 
+        # --- LLM Prompt Tab ---
+        self.prompt_preview_tab = QWidget()
+        prompt_preview_layout = QVBoxLayout(self.prompt_preview_tab)
 
+        tip_label = QLabel("<b>Usage Tip:</b> For the best results, copy this prompt into your LLM's chat window and upload the saved codebase markdown file as an attachment.")
+        tip_label.setWordWrap(True)
+        tip_label.setStyleSheet("padding: 5px; border: 1px solid #444; border-radius: 4px; background-color: #333;")
+        prompt_preview_layout.addWidget(tip_label)
+
+        self.prompt_preview_browser = QTextBrowser()
+        self.prompt_preview_browser.setReadOnly(True)
+        self.prompt_preview_browser.setFont(QFont("Courier New", 11))
+        prompt_preview_layout.addWidget(self.prompt_preview_browser)
+
+        prompt_button_layout = QHBoxLayout()
+        prompt_button_layout.addStretch()
+        btn_copy_prompt = QPushButton("📋 Copy Prompt")
+        btn_copy_prompt.clicked.connect(self.copy_prompt_to_clipboard)
+        prompt_button_layout.addWidget(btn_copy_prompt)
+        prompt_preview_layout.addLayout(prompt_button_layout)
+        
+        self.main_tabs.addTab(self.prompt_preview_tab, "🚀 LLM Prompt")
+
+
+        # --- Prompt Engineering Workflow UI ---
         prompt_studio_container = QWidget()
         prompt_studio_layout = QVBoxLayout(prompt_studio_container)
 
-        task_selector_layout = QHBoxLayout()
-        task_selector_layout.addWidget(QLabel("<b>Select a Task:</b>"))
-        self.task_selector_combo = QComboBox()
-        prompt_modules = self.settings_manager.get("prompt_modules", {})
-        if prompt_modules:
-            self.task_selector_combo.addItems(prompt_modules.keys())
-        task_selector_layout.addWidget(self.task_selector_combo, 1)
-        prompt_studio_layout.addLayout(task_selector_layout)
+        template_selector_layout = QHBoxLayout()
+        template_selector_layout.addWidget(QLabel("<b>Select a Prompt Template:</b>"))
+        self.template_selector_combo = QComboBox()
+        if self.prompt_templates:
+            self.template_selector_combo.addItems([""] + list(self.prompt_templates.keys()))
+        template_selector_layout.addWidget(self.template_selector_combo, 1)
+        prompt_studio_layout.addLayout(template_selector_layout)
 
-        self.prompt_tabs = QTabWidget()
-        prompt_studio_layout.addWidget(self.prompt_tabs)
-        main_splitter.addWidget(prompt_studio_container)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.prompt_module_container = QWidget()
+        self.prompt_module_layout = QFormLayout(self.prompt_module_container)
+        self.prompt_module_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        self.scroll_area.setWidget(self.prompt_module_container)
+        prompt_studio_layout.addWidget(self.scroll_area, 1)
 
-        objective_tab = QWidget()
-        objective_layout = QVBoxLayout(objective_tab)
-        self.prompt_template_combo = QComboBox()
-        self.prompt_template_combo.addItem("Custom Prompt")
-        self.prompt_template_combo.addItems(self.settings_manager.get("prompt_templates", {}).keys())
-        self.objective_text_edit = QTextEdit()
-        objective_layout.addWidget(self.prompt_template_combo)
-        objective_layout.addWidget(self.objective_text_edit)
-        self.prompt_tabs.addTab(objective_tab, "🎯 Objective")
-
-        components_tab = QWidget()
-        components_layout = QVBoxLayout(components_tab)
+        self.components_tab = QWidget()
+        components_layout = QVBoxLayout(self.components_tab)
         self.preamble_checkbox = QCheckBox("Generate 'Table of Contents' Preamble")
         self.preamble_checkbox.setChecked(True)
         components_layout.addWidget(self.preamble_checkbox)
-        components_layout.addWidget(QLabel("<b>Key Files & Roles (Optional):</b>"))
+        components_layout.addWidget(QLabel("<b>Key Files & Roles (for Project Context):</b>"))
         self.key_files_table = QTableWidget(0, 2)
         self.key_files_table.setHorizontalHeaderLabels(["File", "Role/Description"])
         self.key_files_table.horizontalHeader().setStretchLastSection(True)
@@ -164,14 +225,16 @@ class ProjectDocumenter(QMainWindow):
         btn_add_files_to_table = QPushButton("Add Selected Files from Tree")
         btn_add_files_to_table.clicked.connect(self._populate_key_files_table)
         key_files_button_layout.addWidget(btn_add_files_to_table)
-
         btn_remove_files_from_table = QPushButton("Remove Selected File(s)")
         btn_remove_files_from_table.clicked.connect(self._remove_selected_key_files)
         key_files_button_layout.addWidget(btn_remove_files_from_table)
         key_files_button_layout.addStretch()
-
         components_layout.addLayout(key_files_button_layout)
-        self.prompt_tabs.addTab(components_tab, "🧩 Components")
+        
+        self.prompt_tabs = QTabWidget()
+        self.prompt_tabs.addTab(prompt_studio_container, "🚀 Prompt Studio")
+        self.prompt_tabs.addTab(self.components_tab, "🧩 Components")
+        main_splitter.addWidget(self.prompt_tabs)
 
         main_splitter.setSizes([650, 300])
 
@@ -182,18 +245,127 @@ class ProjectDocumenter(QMainWindow):
         self.token_progress_bar = QProgressBar(); self.token_progress_bar.setMaximumWidth(200); self.token_progress_bar.setTextVisible(False); self.status_bar.addPermanentWidget(self.token_progress_bar)
         self.token_count_label = QLabel("Size: ~0 tokens"); self.status_bar.addPermanentWidget(self.token_count_label)
 
+        if self.prompt_templates:
+            self._on_template_selected(self.template_selector_combo.currentText())
+
     def _connect_signals(self):
         self.tree_view.selectionModel().selectionChanged.connect(self.on_tree_selection_changed)
         self.tree_model.itemChanged.connect(self.on_item_changed)
         self.log_text_edit.textChanged.connect(self._on_content_changed)
-        self.objective_text_edit.textChanged.connect(self._on_content_changed)
         self.key_files_table.itemChanged.connect(self._on_content_changed)
-        self.task_selector_combo.currentTextChanged.connect(self._on_task_selected)
-        self.prompt_template_combo.activated.connect(self.apply_prompt_template)
         self.token_budget_combo.currentTextChanged.connect(self.update_token_count)
         self.preamble_checkbox.stateChanged.connect(self._on_content_changed)
+        self.template_selector_combo.currentTextChanged.connect(self._on_template_selected)
+
+    @Slot(str)
+    def _on_template_selected(self, template_name):
+        # Clear existing dynamic widgets
+        while self.prompt_module_layout.count():
+            item = self.prompt_module_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.prompt_module_widgets.clear()
+
+        if not template_name or template_name not in self.prompt_templates:
+            self._on_content_changed()
+            return
+
+        # MODIFICATION: Iterate over the list of modules to preserve order
+        template_modules = self.prompt_templates[template_name]
+        for module_data in template_modules:
+            name = module_data['name']
+            label = QLabel(f"<b>{name.replace('_', ' ').title()}:</b>")
+            
+            if module_data['type'] == 'multiline':
+                widget = QTextEdit(module_data['text'])
+                widget.setAcceptRichText(False)
+                doc_height = widget.document().size().height()
+                widget.setMinimumHeight(int(doc_height) + 15)
+            else:
+                widget = QTextEdit(module_data['text'])
+                widget.setAcceptRichText(False)
+                widget.setFixedHeight(40)
+
+            widget.setReadOnly(not module_data['editable'])
+            widget.textChanged.connect(self._on_content_changed)
+            self.prompt_module_layout.addRow(label, widget)
+            self.prompt_module_widgets[name] = widget
+        
+        self._on_content_changed()
+
+    def _assemble_prompt(self):
+        """
+        Assembles the final prompt from the master template and module widgets.
+        The prompt is formatted for readability and excludes the project context,
+        which is intended to be provided as a separate file.
+        """
+        # If no template is selected, show a helpful hint.
+        if not self.template_selector_combo.currentText():
+            return "Please select a Prompt Template from the 'Prompt Studio' tab to generate a final prompt."
+
+        if not self.master_template:
+            return "Error: Master template not loaded."
+
+        prompt_text = self.master_template
+        
+        # 1. Populate modules from UI widgets
+        for name, widget in self.prompt_module_widgets.items():
+            placeholder = f"{{{{{name}}}}}"
+            content = widget.toPlainText().strip()
+            prompt_text = prompt_text.replace(placeholder, content)
+
+        # 2. Handle optional sections (e.g., {{#if reasoning_module}}...{{/if}})
+        def handle_optional(match):
+            module_name = match.group(1)
+            inner_content = match.group(2)
+            if module_name in self.prompt_module_widgets and self.prompt_module_widgets[module_name].toPlainText().strip():
+                return inner_content
+            return ""
+        prompt_text = re.sub(r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}", handle_optional, prompt_text, flags=re.DOTALL)
+        
+        # 3. Exclude the project_context section entirely, as it's provided separately.
+        prompt_text = re.sub(r"<project_context>.*?</project_context>", "", prompt_text, flags=re.DOTALL)
+
+        # 4. Convert XML-like tags to Markdown headers for better readability.
+        def tags_to_markdown(match):
+            tag_name = match.group(1).replace('_', ' ').title()
+            content = match.group(2).strip()
+            # Only add the section if there is content inside the tags
+            return f"### {tag_name}\n\n{content}" if content else ""
+        prompt_text = re.sub(r"<(\w+)>([\s\S]*?)</\1>", tags_to_markdown, prompt_text)
+
+        # 5. Clean up any remaining unfilled placeholders and excessive newlines.
+        prompt_text = re.sub(r"\{\{\w+\}\}", "", prompt_text)
+        prompt_text = re.sub(r'\n\s*\n', '\n\n', prompt_text) # Collapse multiple blank lines
+
+        return prompt_text.strip()
+
+    @Slot()
+    def _on_content_changed(self):
+        """Central hub for updating UI elements when content changes."""
+        self.update_token_count()
+        self._update_markdown_preview()
+        self._update_prompt_preview() 
+        if not self._is_loading_project:
+            self._save_project_state()
 
     # --- Action Slots (Delegating to modules) ---
+    @Slot()
+    def save_codebase_markdown(self):
+        actions.save_codebase_markdown_action(self)
+
+    @Slot()
+    def focus_prompt_tab(self): # NEW METHOD
+        """Switches the main tab view to the LLM Prompt tab."""
+        for i in range(self.main_tabs.count()):
+            if self.main_tabs.tabText(i) == "🚀 LLM Prompt":
+                self.main_tabs.setCurrentIndex(i)
+                break
+
+    @Slot()
+    def open_settings(self):
+        actions.open_settings_action(self)
     @Slot()
     def generate_markdown(self):
         actions.generate_markdown_action(self)
@@ -222,33 +394,25 @@ class ProjectDocumenter(QMainWindow):
     def on_item_changed(self, item):
         tree_handler.on_item_changed(self, item)
 
-    # --- UI Update and Helper Methods ---
-    @Slot()
-    def _on_content_changed(self):
-        """Central hub for updating UI elements when content changes."""
-        self.update_token_count()
-        self._update_markdown_preview()
-        if not self._is_loading_project:
-            self._save_project_state()
-
-    def _assemble_prompt(self):
-        objective = self.objective_text_edit.toPlainText().strip()
-        components_text = ""
-        master_template = self.settings_manager.get("master_prompt_template", "{objective}\n\n{components}")
-        return master_template.format(objective=objective, components=components_text).strip()
-
     @Slot()
     def _update_markdown_preview(self):
-        """Generates and displays the full markdown preview."""
-        markdown_content = actions.assemble_full_markdown(self)
+        """Generates and displays the codebase markdown preview."""
+        markdown_content = actions.assemble_codebase_markdown(self)
         self.markdown_preview_browser.setMarkdown(markdown_content)
+    
+    @Slot()
+    def _update_prompt_preview(self): # NEW METHOD
+        """Generates and displays the final LLM prompt preview."""
+        prompt_content = self._assemble_prompt()
+        self.prompt_preview_browser.setText(prompt_content)
 
-    @Slot(str)
-    def _on_task_selected(self, task_name):
-        task_data = self.settings_manager.get("prompt_modules", {}).get(task_name, {})
-        self.objective_text_edit.setPlainText(task_data.get("objective", ""))
-        self.main_tabs.setCurrentIndex(1 if task_data.get("focus_tab") == "Logs / Console" else 0)
-        self._on_content_changed()
+    @Slot()
+    def copy_prompt_to_clipboard(self): # NEW METHOD
+        """Copies the content of the prompt preview browser to the clipboard."""
+        from PySide6.QtGui import QClipboard
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.prompt_preview_browser.toPlainText())
+        QMessageBox.information(self, "Copied!", "The final prompt has been copied to your clipboard.")
 
     @Slot()
     def _populate_key_files_table(self):
@@ -286,7 +450,7 @@ class ProjectDocumenter(QMainWindow):
         self._save_project_state()
 
     def update_token_count(self):
-        prompt_chars = len(self._assemble_prompt())
+        prompt_chars = len(actions.assemble_final_prompt(self))
         log_chars = len(self.log_text_edit.toPlainText())
         code_chars = sum(len(item['content']) for item in content_utils.get_checked_content(self))
         estimated_tokens = int((prompt_chars + log_chars + code_chars) / 4)
@@ -307,7 +471,7 @@ class ProjectDocumenter(QMainWindow):
         else:
             self.token_progress_bar.setVisible(False)
 
-    # --- Project Loading and Management ---
+    # --- Project Loading and Management (largely unchanged) ---
     @Slot()
     def show_welcome_or_load_project(self):
         path_to_load = sys.argv[1] if len(sys.argv) > 1 and os.path.isdir(sys.argv[1]) else None
@@ -354,8 +518,7 @@ class ProjectDocumenter(QMainWindow):
         self.worker_thread.started.connect(self.worker.run)
         self.worker.results_ready.connect(self.populate_tree_from_data)
         self.worker.error.connect(self.on_loading_error)
-
-        # Connect finished signals for proper cleanup
+        
         self.worker.finished.connect(self.worker_thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
@@ -414,7 +577,8 @@ class ProjectDocumenter(QMainWindow):
 
     def set_ui_enabled(self, enabled):
         is_project_loaded = bool(self.project_path)
-        self.generate_action.setEnabled(enabled and is_project_loaded)
+        self.save_markdown_action.setEnabled(enabled and is_project_loaded)
+        self.generate_prompt_action.setEnabled(enabled and is_project_loaded)
         self.open_action.setEnabled(enabled)
         self.refresh_action.setEnabled(enabled and is_project_loaded)
         self.toggle_all_action.setEnabled(enabled and is_project_loaded)
@@ -422,23 +586,62 @@ class ProjectDocumenter(QMainWindow):
 
     # --- Menu, Toolbar, and Window Setup ---
     def create_actions(self):
-        self.open_action = QAction(self.style().standardIcon(QStyle.SP_DirOpenIcon), "&Open Project...", self); self.open_action.triggered.connect(self.select_folder_dialog)
-        self.refresh_action = QAction(self.style().standardIcon(QStyle.SP_BrowserReload), "&Refresh", self); self.refresh_action.triggered.connect(self.refresh_project); self.refresh_action.setEnabled(False)
-        self.generate_action = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "&Generate Context", self); self.generate_action.triggered.connect(self.generate_markdown); self.generate_action.setEnabled(False)
-        self.exit_action = QAction("E&xit", self); self.exit_action.triggered.connect(self.close)
-        self.toggle_all_action = QAction("&Toggle All Selections", self); self.toggle_all_action.triggered.connect(self.toggle_all_selections)
-        self.settings_action = QAction("Settings...", self); self.settings_action.triggered.connect(self.open_settings)
-        self.about_action = QAction("&About", self); self.about_action.triggered.connect(self.show_about_dialog)
+        self.open_action = QAction(self.style().standardIcon(QStyle.SP_DirOpenIcon), "&Open Project...", self)
+        self.open_action.triggered.connect(self.select_folder_dialog)
+        
+        self.refresh_action = QAction(self.style().standardIcon(QStyle.SP_BrowserReload), "&Refresh", self)
+        self.refresh_action.triggered.connect(self.refresh_project)
+        self.refresh_action.setEnabled(False)
+
+        self.save_markdown_action = QAction(self.style().standardIcon(QStyle.SP_DialogSaveButton), "&Save Codebase Markdown...", self)
+        self.save_markdown_action.triggered.connect(self.save_codebase_markdown)
+        self.save_markdown_action.setEnabled(False)
+
+        self.exit_action = QAction("E&xit", self)
+        self.exit_action.triggered.connect(self.close)
+        
+        self.toggle_all_action = QAction("&Toggle All Selections", self)
+        self.toggle_all_action.triggered.connect(self.toggle_all_selections)
+        
+        self.settings_action = QAction("Settings...", self)
+        self.settings_action.triggered.connect(self.open_settings)
+        
+        self.about_action = QAction("&About", self)
+        self.about_action.triggered.connect(self.show_about_dialog)
+
+        self.generate_prompt_action = QAction(QIcon.fromTheme("document-send", self.style().standardIcon(QStyle.SP_CustomBase)), "🚀 &Generate Final Prompt", self)
+        self.generate_prompt_action.triggered.connect(self.focus_prompt_tab) # CHANGED
+        self.generate_prompt_action.setEnabled(False)
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
-        self.file_menu = menu_bar.addMenu("&File"); self.file_menu.addAction(self.open_action)
+        self.file_menu = menu_bar.addMenu("&File")
+        self.file_menu.addAction(self.open_action)
         self.recent_projects_menu = self.file_menu.addMenu("Recent Projects")
-        self.file_menu.addSeparator(); self.file_menu.addAction(self.generate_action); self.file_menu.addSeparator(); self.file_menu.addAction(self.exit_action)
-        edit_menu = menu_bar.addMenu("&Edit"); edit_menu.addAction(self.refresh_action); edit_menu.addAction(self.toggle_all_action)
-        settings_menu = menu_bar.addMenu("&Settings"); settings_menu.addAction(self.settings_action)
-        help_menu = menu_bar.addMenu("&Help"); help_menu.addAction(self.about_action)
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.save_markdown_action)
+        self.file_menu.addAction(self.generate_prompt_action)
+        self.file_menu.addSeparator()
+        self.file_menu.addAction(self.exit_action)
+        edit_menu = menu_bar.addMenu("&Edit")
+        edit_menu.addAction(self.refresh_action)
+        edit_menu.addAction(self.toggle_all_action)
+        settings_menu = menu_bar.addMenu("&Settings")
+        settings_menu.addAction(self.settings_action)
+        help_menu = menu_bar.addMenu("&Help")
+        help_menu.addAction(self.about_action)
         self.update_recent_projects_menu()
+
+    def create_tool_bar(self):
+        tool_bar = self.addToolBar("Main Toolbar")
+        tool_bar.setMovable(False)
+        tool_bar.addAction(self.open_action)
+        tool_bar.addAction(self.refresh_action)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self.save_markdown_action)
+        tool_bar.addAction(self.generate_prompt_action)
+        tool_bar.addSeparator()
+        tool_bar.addAction(self.settings_action)
 
     def update_recent_projects_menu(self):
         self.recent_projects_menu.clear()
@@ -448,14 +651,9 @@ class ProjectDocumenter(QMainWindow):
                 action = QAction(path, self); action.triggered.connect(partial(self.load_project, path)); self.recent_projects_menu.addAction(action)
         self.recent_projects_menu.setEnabled(len(recent_paths) > 0)
 
-    def create_tool_bar(self):
-        tool_bar = self.addToolBar("Main Toolbar"); tool_bar.setMovable(False)
-        tool_bar.addAction(self.open_action); tool_bar.addAction(self.refresh_action); tool_bar.addAction(self.generate_action)
-        tool_bar.addSeparator(); tool_bar.addAction(self.settings_action)
-
     @Slot()
     def show_about_dialog(self):
-        QMessageBox.about(self, "About LLM-Sherpa", "<h2>LLM-Sherpa v3.4</h2><p>An intelligent project briefing and context generation tool.</p>")
+        QMessageBox.about(self, "About LLM-Sherpa", "<h2>LLM-Sherpa v4.0</h2><p>An intelligent project briefing and context generation tool.</p>")
 
     def _get_component_roles(self):
         roles = {}
@@ -478,7 +676,6 @@ class ProjectDocumenter(QMainWindow):
         self.key_files_table.resizeColumnsToContents()
 
     def _save_project_state(self):
-        """Saves the current state of the tree and component roles for the current project."""
         if not self.project_path or not self.settings_manager.get("restore_tree_selection"):
             return
 
@@ -520,12 +717,6 @@ class ProjectDocumenter(QMainWindow):
             self.code_preview.setHtml(full_html)
         else:
             self.code_preview.setText(code)
-
-    @Slot()
-    def apply_prompt_template(self):
-        template_name = self.prompt_template_combo.currentText()
-        if template_name != "Custom Prompt":
-            self.objective_text_edit.setPlainText(self.settings_manager.get("prompt_templates", {}).get(template_name, ""))
 
 
 if __name__ == "__main__":

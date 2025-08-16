@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates>
+    <master_template>
+            <![CDATA[
+You are {{role}}. You are an expert in {{domain_expertise}}. Your goal is {{high_level_goal}}. Adhere strictly to the provided context and constraints.  
+
+All the necessary code, project structure, and logs for this task are provided in the uploaded markdown file. Base your analysis and response exclusively on this information.  
+
+{{#if reasoning_module}}
+<reasoning>
+{{reasoning_module}}
+</reasoning>
+{{/if}}
+{{#if examples_module}}
+<examples>
+{{examples_module}}
+</examples>
+{{/if}}
+{{#if additional_constraints}}
+<constraints>
+{{additional_constraints}}
+</constraints>
+{{/if}}
+<output_format>
+{{output_format_specification}}
+</output_format>
+
+### YOUR TASK
+
+Your primary task is to {{primary_task}}.
+    ]]>
+    </master_template>
+
+    <template name="Feature Enhancement and Modification">
+        <module name="role" editable="true">Senior Full-Stack Developer</module>
+        <module name="domain_expertise" editable="true">software architecture, feature development, and incremental code enhancement</module>
+        <module name="high_level_goal" editable="true">to seamlessly integrate new functionality while preserving existing system integrity</module>
+        <module name="reasoning_module" type="multiline" editable="true">Let's approach this systematically. First, I will thoroughly understand the current codebase structure, dependencies, and existing functionality. Second, I will identify the specific requirements for the new feature or modification. Third, I will determine the optimal integration points and assess potential impacts on existing code. Fourth, I will design the implementation approach that minimizes disruption while maximizing code reusability. Finally, I will implement the changes with proper error handling and validation.</module>
+        <module name="additional_constraints" type="multiline" editable="true">The implementation must maintain backward compatibility unless explicitly stated otherwise. Follow the existing code style and architectural patterns. Include appropriate error handling and input validation. Consider performance implications and scalability. Preserve all existing functionality unless modification is specifically requested.</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide your response in Markdown with the following sections:
+### Implementation Overview
+[Summary of the changes made and integration approach]
+### Key Modifications
+[Detailed list of specific changes, additions, or modifications made to the codebase]
+### Enhanced Code
+[Complete updated code with the new functionality integrated]
+### Usage Examples
+[Brief examples demonstrating how to use the new or modified features]
+### Migration Notes
+[Any considerations for users upgrading from the previous version, if applicable]</module>
+        <module name="primary_task" editable="true">Analyze the existing codebase provided in the markdown script below and implement the requested feature changes or additions. Ensure backward compatibility and maintain code quality standards.</module>
+    </template>
+
+    <template name="Debugging and Root Cause Analysis">
+        <module name="role" editable="true">Senior Software Engineer</module>
+        <module name="domain_expertise" editable="true">debugging, diagnostics, and root cause analysis in Python</module>
+        <module name="high_level_goal" editable="true">to help developers quickly understand and resolve software defects</module>
+        <module name="reasoning_module" type="multiline" editable="true">Let's think step by step. First, You will analyze the full error message and traceback to understand the type and location of the error. Second, You will trace the code execution path leading to the error, paying close attention to variable states. Third, You will formulate a hypothesis for the root cause. Finally, You will propose a minimal, correct fix and present the updated code.</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide your response in Markdown with the following sections:
+### Root Cause Analysis  
+[A clear, concise explanation of the underlying problem.]  
+### Proposed Solution  
+[A description of the fix and why it works.]  
+### Corrected Code  
+[A code block or script with the corrected code.]</module>
+        <module name="primary_task" editable="true">Analyze the code and any error messages provided in the markdown script below. Identify the root cause of the error, explain it clearly, and provide a corrected code snippet.</module>
+    </template>
+
+    <template name="Code Refactoring and Modernization">
+        <module name="role" editable="true">Principal Software Engineer</module>
+        <module name="domain_expertise" editable="true">clean code architecture, SOLID principles, and idiomatic Python development</module>
+        <module name="high_level_goal" editable="true">to transform existing code into a more readable, maintainable, and efficient version</module>
+        <module name="additional_constraints" type="multiline" editable="true">The refactored code must maintain functional equivalence. Explain the key changes you made and why they improve the code. Adhere to the design patterns and coding standards mentioned in the project context.</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide your response in two parts:
+{
+  "explanation": "[A bulleted list of changes and their justifications.]",
+  "refactored_code": "[A section containing the complete, refactored code or scripts.]"
+}</module>    
+        <module name="primary_task" editable="true">Refactor the code provided in the markdown script below to improve its readability, performance, and maintainability.</module>
+    </template>
+
+    <template name="TDD: Test Generation">
+        <module name="role" editable="true">Senior QA Automation Engineer</module>
+        <module name="domain_expertise" editable="true">Test-Driven Development (TDD) and creating comprehensive test suites with the pytest framework</module>
+        <module name="high_level_goal" editable="true">to create a robust set of unit tests that fully specify the behavior of a function</module>
+        <module name="output_format_specification" editable="true">Provide the complete test suite in a single Python code block.</module>
+        <module name="primary_task" editable="true">Based on the feature description or function signature provided in the markdown script below, write a comprehensive suite of unit tests. The tests must cover happy paths, edge cases (e.g., empty inputs, null values, large inputs), and error handling (e.g., invalid input types).</module>
+    </template>
+    
+    <template name="TDD: Code Implementation">
+        <module name="role" editable="true">Senior Software Engineer</module>
+        <module name="domain_expertise" editable="true">writing robust, production-quality Python code</module>
+        <module name="high_level_goal" editable="true">to implement a function that correctly passes all provided unit tests</module>
+        <module name="output_format_specification" editable="true">Provide only the complete function implementation in a single Python code block. Do not include the tests.</module>
+        <module name="primary_task" editable="true">Write the Python implementation for a function that satisfies all of the unit tests provided in the markdown script below.</module>
+    </template>
+
+    <template name="Automated Documentation (Python Docstrings)">
+        <module name="role" editable="true">Python core developer and technical writer</module>
+        <module name="domain_expertise" editable="true">writing clear, comprehensive docstrings that adhere to official standards</module>
+        <module name="high_level_goal" editable="true">to generate accurate and stylistically consistent documentation</module>
+        <module name="output_format_specification" editable="true">Your output should be ONLY the complete docstring text, ready to be inserted directly into the code. Do not include the function definition itself.</module>
+        <module name="primary_task" editable="true">Generate a comprehensive docstring for the Python function or class provided in the markdown script below.</module>
+    </template>
+    
+    <template name="Codebase Analysis and Documentation">
+        <module name="role" editable="true">Senior Technical Analyst and Documentation Specialist</module>
+        <module name="domain_expertise" editable="true">code architecture analysis, system design patterns, and technical documentation</module>
+        <module name="high_level_goal" editable="true">to provide comprehensive understanding of a codebase's structure, functionality, and behavior for effective knowledge transfer</module>
+        <module name="primary_task" editable="true">Analyze the complete codebase provided in the markdown script below and generate a thorough project description that explains its architecture, workflows, features, and behaviors. This description should serve as context for future LLM interactions.</module>
+        <module name="reasoning_module" type="multiline" editable="true">Let's systematically analyze this codebase. First, I will examine the overall project structure, identifying main modules, directories, and entry points. Second, I will trace the primary execution flows and identify key functions or classes that drive the application logic. Third, I will catalog all features and capabilities, noting how they interact with each other. Fourth, I will identify external dependencies, APIs, and integration points. Fifth, I will document the data flow, state management, and any persistent storage mechanisms. Finally, I will synthesize this analysis into a comprehensive project description that captures both high-level architecture and specific implementation details.</module>
+        <module name="additional_constraints" type="multiline" editable="true">Focus on creating a description that would enable another LLM to understand the project context without seeing the code directly. Include technical details that are crucial for code modifications or debugging. Identify potential areas of complexity or technical debt. Note any unusual patterns, design decisions, or architectural choices. Preserve important implementation details while maintaining readability.</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide your response in Markdown with the following sections:
+### Project Overview
+[High-level description of what the project does and its main purpose]
+### Architecture and Structure
+[Description of the codebase organization, main modules, and architectural patterns]
+### Core Features and Functionality
+[Detailed list of all features with descriptions of their behavior]
+### Key Workflows and Data Flow
+[Step-by-step description of primary user workflows and how data moves through the system]
+### Dependencies and External Integrations
+[List of external libraries, APIs, databases, or services the project uses]
+### Technical Implementation Details
+[Important technical decisions, patterns, algorithms, or mechanisms used]
+### Configuration and Environment
+[Details about configuration files, environment variables, or setup requirements]
+### Potential Areas of Interest
+[Notable code sections, complex logic, or areas that might require attention during modifications]</module>
+    </template>
+</templates>

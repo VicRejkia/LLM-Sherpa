@@ -1,13 +1,12 @@
 import os
 import json
-import ast
 
 from PySide6.QtWidgets import (
     QDialog, QCheckBox, QLabel, QDialogButtonBox, QTextEdit,
     QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QListWidgetItem, QMessageBox,
-    QTabWidget, QWidget, QWizard, QWizardPage, QSplitter, QApplication
+    QTabWidget, QWidget
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 
 class SettingsWindow(QDialog):
     def __init__(self, settings_manager, parent=None):
@@ -49,16 +48,14 @@ class SettingsWindow(QDialog):
         layout.addWidget(self.ext_map_text, stretch=2)
         tabs.addTab(exclusions_tab, "Exclusions & Mappings")
 
-        # LLM & Prompts Tab
+        # LLM Tab
         llm_tab = QWidget()
         layout = QVBoxLayout(llm_tab)
         layout.addWidget(QLabel("<b>LLM Token Budgets (JSON format):</b>"))
         self.token_budgets_text = QTextEdit(text=json.dumps(self.settings_manager.get("llm_token_budgets"), indent=4))
         layout.addWidget(self.token_budgets_text)
-        layout.addWidget(QLabel("\n<b>Prompt Modules (JSON format for Task Selector):</b>"))
-        self.prompt_modules_text = QTextEdit(text=json.dumps(self.settings_manager.get("prompt_modules"), indent=4))
-        layout.addWidget(self.prompt_modules_text)
-        tabs.addTab(llm_tab, "LLM & Prompts")
+        layout.addStretch()
+        tabs.addTab(llm_tab, "LLM Budgets")
 
         self.button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
@@ -75,7 +72,6 @@ class SettingsWindow(QDialog):
         try:
             self.settings_manager.set("extension_map", json.loads(self.ext_map_text.toPlainText()))
             self.settings_manager.set("llm_token_budgets", json.loads(self.token_budgets_text.toPlainText()))
-            self.settings_manager.set("prompt_modules", json.loads(self.prompt_modules_text.toPlainText()))
         except json.JSONDecodeError as e:
             QMessageBox.critical(self, "Invalid JSON", f"Error parsing JSON.\n\n{e}")
             return
@@ -113,75 +109,3 @@ class WelcomeDialog(QDialog):
     
     def open_new(self):
         self.selected_path = "OPEN_NEW"; super().accept()
-
-class IterativeRefinementDialog(QDialog):
-    """A dialog for the iterative refinement workflow."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Iterative Refinement Workflow")
-        self.setMinimumSize(800, 600)
-        layout = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Horizontal)
-        left_widget = QWidget(); left_layout = QVBoxLayout(left_widget)
-        left_layout.addWidget(QLabel("<b>1. Paste LLM's initial code generation here:</b>"))
-        self.llm_output_text = QTextEdit(); left_layout.addWidget(self.llm_output_text)
-        splitter.addWidget(left_widget)
-        right_widget = QWidget(); right_layout = QVBoxLayout(right_widget)
-        right_layout.addWidget(QLabel("<b>2. Copy this prompt and send it to the LLM:</b>"))
-        self.critique_prompt_text = QTextEdit(); self.critique_prompt_text.setReadOnly(True)
-        critique_prompt = "Now, review the code you just wrote. Identify potential bugs, edge cases that are not handled, and areas where readability could be improved."
-        self.critique_prompt_text.setPlainText(critique_prompt)
-        btn_copy = QPushButton("Copy to Clipboard")
-        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(critique_prompt))
-        right_layout.addWidget(self.critique_prompt_text); right_layout.addWidget(btn_copy)
-        splitter.addWidget(right_widget)
-        layout.addWidget(splitter)
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Close)
-        self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
-
-class TDDWizard(QWizard):
-    """A wizard for the Test-Driven Development workflow."""
-    def __init__(self, settings_manager, parent=None):
-        super().__init__(parent)
-        self.settings_manager = settings_manager
-        self.setWindowTitle("TDD Feature Generation")
-        self.addPage(self.create_feature_page())
-        self.addPage(self.create_implementation_page())
-
-    def create_feature_page(self):
-        page = QWizardPage(); page.setTitle("Step 1: Generate Tests")
-        page.setSubTitle("Describe the feature you want to build.")
-        layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("<b>Feature Description:</b>"))
-        self.feature_description = QTextEdit()
-        self.feature_description.setPlaceholderText("e.g., 'A function that takes a list of integers and returns the sum of all even numbers.'")
-        layout.addWidget(self.feature_description, 1)
-        self.test_prompt_preview = QTextEdit(); self.test_prompt_preview.setReadOnly(True)
-        layout.addWidget(QLabel("<b>Generated Prompt for Tests:</b>"))
-        layout.addWidget(self.test_prompt_preview, 1)
-        self.feature_description.textChanged.connect(self.update_test_prompt)
-        QTimer.singleShot(0, self.update_test_prompt)
-        return page
-
-    def create_implementation_page(self):
-        page = QWizardPage(); page.setTitle("Step 2: Implement Code")
-        page.setSubTitle("Paste the generated tests from the LLM.")
-        layout = QVBoxLayout(page)
-        layout.addWidget(QLabel("<b>Paste Generated Test Suite Here:</b>"))
-        self.test_suite_input = QTextEdit(); layout.addWidget(self.test_suite_input, 1)
-        self.code_prompt_preview = QTextEdit(); self.code_prompt_preview.setReadOnly(True)
-        layout.addWidget(QLabel("<b>Generated Prompt for Code Implementation:</b>"))
-        layout.addWidget(self.code_prompt_preview, 1)
-        self.test_suite_input.textChanged.connect(self.update_code_prompt)
-        return page
-
-    def update_test_prompt(self):
-        template = self.settings_manager.get("tdd_prompts", {}).get("test_generation", "")
-        description = self.feature_description.toPlainText()
-        self.test_prompt_preview.setPlainText(template.format(feature_description=description))
-
-    def update_code_prompt(self):
-        template = self.settings_manager.get("tdd_prompts", {}).get("code_implementation", "")
-        test_suite = self.test_suite_input.toPlainText()
-        self.code_prompt_preview.setPlainText(template.format(test_suite=test_suite))

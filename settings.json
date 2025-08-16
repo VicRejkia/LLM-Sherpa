@@ -45,25 +45,5 @@
         "Claude 3 Sonnet (200k)": 200000,
         "Gemini 1.5 Pro (1M)": 1000000
     },
-    "prompt_templates": {
-        "Find Bug": "The following code and error log are from my application. Find the bug and suggest a fix.",
-        "Write Unit Tests (pytest)": "Generate a comprehensive set of unit tests for the selected code using the pytest framework.",
-        "Explain Code": "Explain the following code to a junior developer, focusing on the overall architecture and the purpose of each key function.",
-        "Refactor Code": "Review the selected code for potential improvements. Suggest refactorings to enhance readability, performance, and maintainability."
-    },
-    "prompt_modules": {
-        "Code Generation": {
-            "Generate Python function from docstring": "You are a Python expert. Your task is to write a Python function that implements the functionality described in the following docstring. The function should be efficient, well-commented, and strictly adhere to PEP 8 standards.\n\n**Docstring:**\n```python\n{user_input}\n```\n\nProvide only the complete Python code for the function.",
-            "Translate code to another language": "Act as an expert programmer in both {source_language} and {target_language}. Your task is to translate the following code snippet accurately. Preserve the original logic, structure, comments, and variable naming conventions. Do not add any new functionality.\n\n**Source Code ({source_language}):**\n```{source_language}\n{code_block}\n```\n\n**Translated Code ({target_language}):**"
-        },
-        "Debugging & Refactoring": {
-            "Find potential bugs": "You are a senior software engineer conducting a code review. Analyze the following code for potential bugs, security vulnerabilities, race conditions, and unhandled edge cases. For each issue found, explain the potential impact and provide a corrected code snippet.\n\n**Code to review:**\n```python\n{code_block}\n```",
-            "Refactor for readability": "Refactor the following code to improve its readability and maintainability without altering its functionality. Focus on applying clean code principles: improve variable names, simplify complex conditionals, break down long functions, and ensure a logical structure. Add comments only where the logic is non-obvious.\n\n**Code to refactor:**\n```python\n{code_block}\n```"
-        },
-        "Documentation": {
-            "Generate docstrings": "Generate a comprehensive docstring for the following Python code. Follow the Google Python Style Guide for docstrings. The docstring should include a concise summary, detailed descriptions for all arguments (Args:), return values (Returns:), and any exceptions that might be raised (Raises:).\n\n**Code to document:**\n```python\n{code_block}\n```",
-            "Write project README": "You are a technical writer. Based on the project context provided below, write a professional and user-friendly README.md file. The README should include:\n- A compelling project title and a short, descriptive tagline.\n- A 'Key Features' section (as a bulleted list).\n- Clear 'Installation' instructions.\n- A simple 'Usage' example.\n\n**Project Context:**\n```\n{project_context}\n```"
-        }
-    },
     "last_project_path": "C:/Users/Sascha/Documents/Projects/python/llm-sherpa"
 }
