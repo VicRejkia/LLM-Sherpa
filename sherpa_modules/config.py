@@ -19,7 +19,7 @@ class SettingsManager:
                 ".css": "css", ".json": "json", ".md": "markdown", ".txt": "text",
                 ".yml": "yaml", ".yaml": "yaml", ".toml": "toml", ".ini": "ini",
                 ".sh": "bash", ".bat": "batch", ".dockerfile": "dockerfile", ".java": "java",
-                ".cpp": "cpp", ".c": "c", ".h": "c", ".hpp": "cpp", ".cs": "csharp"
+                ".cpp": "cpp", ".c": "c", ".h": "c", ".hpp": "cpp", ".cs": "csharp", ".*": "text"
             },
             "exclude_list": [
                 "__pycache__", ".git", ".vscode", "node_modules", "venv", ".env", "target", "build", "dist"

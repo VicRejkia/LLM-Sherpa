@@ -12,23 +12,23 @@ def get_tree_state(main_window):
             item_data = item.data(Qt.UserRole)
             if item_data:
                 item_id = item_data.get('id')
-                # Capture checked state for any checked or partially checked item
                 if item.checkState() in (Qt.CheckState.Checked, Qt.CheckState.PartiallyChecked):
                     checked_ids.append(item_id)
-                # Separately, capture the expanded state
                 if item.hasChildren() and main_window.tree_view.isExpanded(item.index()):
                     expanded_ids.append(item_id)
             
-            # Always recurse into children to find all checked items, regardless of expansion
             if item.hasChildren():
                 recurse(item)
     
     recurse(root)
     return {"checked": checked_ids, "expanded": expanded_ids}
 
-def restore_tree_state(main_window):
-    """Restores the checked and expanded states from the config."""
-    state = main_window.config_manager.get("tree_states", {}).get(main_window.project_path)
+def restore_tree_state(main_window, state=None):
+    """Restores the checked and expanded states from a state dictionary or the config."""
+    if state is None:
+        # Fallback to old behavior if no state is passed directly
+        state = main_window.config_manager.get("tree_states", {}).get(main_window.project_path)
+    
     if not state: return
     
     main_window._is_updating_checks = True
@@ -41,13 +41,19 @@ def restore_tree_state(main_window):
         for row in range(parent_item.rowCount()):
             item = parent_item.child(row, 0)
             if not item: continue
+            # Reset check state before applying the new one
+            item.setCheckState(Qt.CheckState.Unchecked)
             item_data = item.data(Qt.UserRole)
             if item_data:
                 item_id = item_data.get('id')
                 if item_id in checked_set:
                     item.setCheckState(Qt.CheckState.Checked)
+                # Collapse all first, then expand only the saved ones
+                if main_window.tree_view.isExpanded(item.index()):
+                    main_window.tree_view.collapse(item.index())
                 if item_id in expanded_set:
                     main_window.tree_view.expand(item.index())
+
             if item.hasChildren():
                 q.append(item)
     
@@ -105,5 +111,4 @@ def on_item_changed(main_window, item):
     
     main_window._is_updating_checks = False
     
-    # This single call now handles updating tokens, the markdown preview, and saving the project state.
     main_window._on_content_changed()

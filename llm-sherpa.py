@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QPushButton, QTreeView, QTextEdit, QFileDialog, QMessageBox,
     QLabel, QStatusBar, QTextBrowser, QToolBar, QStyle,
     QHeaderView, QSplitter, QTabWidget, QComboBox, QProgressBar,
-    QTableWidget, QTableWidgetItem, QCheckBox, QScrollArea, QFormLayout
+    QTableWidget, QTableWidgetItem, QCheckBox, QScrollArea, QFormLayout,
+    QInputDialog, QListWidget, QListWidgetItem
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QFont
 from PySide6.QtCore import Qt, Slot, QThread, QTimer
@@ -46,6 +47,11 @@ class ProjectDocumenter(QMainWindow):
         self.prompt_templates = {}
         self.master_template = ""
         self.prompt_module_widgets = {}
+
+        # --- NEW Template State Management ---
+        self.active_template_name = "Default"
+        self.templates = {}
+        self._is_switching_templates = False
 
         self.worker = None
         self.worker_thread = None
@@ -189,7 +195,6 @@ class ProjectDocumenter(QMainWindow):
         
         self.main_tabs.addTab(self.prompt_preview_tab, "🚀 LLM Prompt")
 
-
         # --- Prompt Engineering Workflow UI ---
         prompt_studio_container = QWidget()
         prompt_studio_layout = QVBoxLayout(prompt_studio_container)
@@ -213,7 +218,6 @@ class ProjectDocumenter(QMainWindow):
         self.components_tab = QWidget()
         components_layout = QVBoxLayout(self.components_tab)
         
-        # --- NEW Project Description Section ---
         components_layout.addWidget(QLabel("<b>📝 Project Description:</b>"))
         description_hint_label = QLabel("Use the `Codebase Analysis and Documentation` prompt-template, copy the Prompt to your LLM chatbox and upload the markdown file.")
         description_hint_label.setWordWrap(True)
@@ -225,7 +229,6 @@ class ProjectDocumenter(QMainWindow):
         self.project_description_text_edit.setMinimumHeight(80)
         components_layout.addWidget(self.project_description_text_edit, 1)
         components_layout.addSpacing(15)
-        # --- END NEW Section ---
         
         self.preamble_checkbox = QCheckBox("Generate 'Table of Contents' Preamble")
         self.preamble_checkbox.setChecked(True)
@@ -247,9 +250,26 @@ class ProjectDocumenter(QMainWindow):
         key_files_button_layout.addStretch()
         components_layout.addLayout(key_files_button_layout)
         
+        # --- NEW Selection Templates Tab ---
+        self.templates_tab = QWidget()
+        templates_layout = QVBoxLayout(self.templates_tab)
+        templates_layout.addWidget(QLabel("<b>Manage and load session configurations.</b>"))
+        self.template_list_widget = QListWidget()
+        self.template_list_widget.setToolTip("Click a template to load it. Your current selections will be saved to the active template first.")
+        templates_layout.addWidget(self.template_list_widget)
+        
+        template_btn_layout = QHBoxLayout()
+        self.btn_save_template = QPushButton("Save Current as New Template...")
+        self.btn_delete_template = QPushButton("Delete Selected Template")
+        template_btn_layout.addWidget(self.btn_save_template)
+        template_btn_layout.addWidget(self.btn_delete_template)
+        template_btn_layout.addStretch()
+        templates_layout.addLayout(template_btn_layout)
+
         self.prompt_tabs = QTabWidget()
         self.prompt_tabs.addTab(prompt_studio_container, "🚀 Prompt Studio")
         self.prompt_tabs.addTab(self.components_tab, "🧩 Components")
+        self.prompt_tabs.addTab(self.templates_tab, "💾 Selection Templates") # Add new tab
         main_splitter.addWidget(self.prompt_tabs)
 
         main_splitter.setSizes([650, 300])
@@ -273,6 +293,10 @@ class ProjectDocumenter(QMainWindow):
         self.token_budget_combo.currentTextChanged.connect(self.update_token_count)
         self.preamble_checkbox.stateChanged.connect(self._on_content_changed)
         self.template_selector_combo.currentTextChanged.connect(self._on_template_selected)
+        # --- NEW Template Signals ---
+        self.btn_save_template.clicked.connect(self._prompt_and_save_new_template)
+        self.btn_delete_template.clicked.connect(self._delete_selected_template)
+        self.template_list_widget.currentItemChanged.connect(self._handle_template_selection_change)
 
     @Slot(str)
     def _on_template_selected(self, template_name):
@@ -312,12 +336,6 @@ class ProjectDocumenter(QMainWindow):
         self._on_content_changed()
 
     def _assemble_prompt(self):
-        """
-        Assembles the final prompt from the master template and module widgets.
-        The prompt is formatted for readability and excludes the project context,
-        which is intended to be provided as a separate file.
-        """
-        # If no template is selected, show a helpful hint.
         if not self.template_selector_combo.currentText():
             return "Please select a Prompt Template from the 'Prompt Studio' tab to generate a final prompt."
 
@@ -326,13 +344,11 @@ class ProjectDocumenter(QMainWindow):
 
         prompt_text = self.master_template
         
-        # 1. Populate modules from UI widgets
         for name, widget in self.prompt_module_widgets.items():
             placeholder = f"{{{{{name}}}}}"
             content = widget.toPlainText().strip()
             prompt_text = prompt_text.replace(placeholder, content)
 
-        # 2. Handle optional sections (e.g., {{#if reasoning_module}}...{{/if}})
         def handle_optional(match):
             module_name = match.group(1)
             inner_content = match.group(2)
@@ -341,31 +357,28 @@ class ProjectDocumenter(QMainWindow):
             return ""
         prompt_text = re.sub(r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}", handle_optional, prompt_text, flags=re.DOTALL)
         
-        # 3. Exclude the project_context section entirely, as it's provided separately.
         prompt_text = re.sub(r"<project_context>.*?</project_context>", "", prompt_text, flags=re.DOTALL)
 
-        # 4. Convert XML-like tags to Markdown headers for better readability.
         def tags_to_markdown(match):
             tag_name = match.group(1).replace('_', ' ').title()
             content = match.group(2).strip()
-            # Only add the section if there is content inside the tags
             return f"### {tag_name}\n\n{content}" if content else ""
         prompt_text = re.sub(r"<(\w+)>([\s\S]*?)</\1>", tags_to_markdown, prompt_text)
 
-        # 5. Clean up any remaining unfilled placeholders and excessive newlines.
         prompt_text = re.sub(r"\{\{\w+\}\}", "", prompt_text)
-        prompt_text = re.sub(r'\n\s*\n', '\n\n', prompt_text) # Collapse multiple blank lines
+        prompt_text = re.sub(r'\n\s*\n', '\n\n', prompt_text)
 
         return prompt_text.strip()
 
     @Slot()
     def _on_content_changed(self):
         """Central hub for updating UI elements when content changes."""
+        if self._is_loading_project or self._is_switching_templates:
+            return
         self.update_token_count()
         self._update_markdown_preview()
         self._update_prompt_preview() 
-        if not self._is_loading_project:
-            self._save_project_state()
+        self._save_current_state_to_active_template()
 
     # --- Action Slots (Delegating to modules) ---
     @Slot()
@@ -373,19 +386,12 @@ class ProjectDocumenter(QMainWindow):
         actions.save_codebase_markdown_action(self)
 
     @Slot()
-    def focus_prompt_tab(self): # NEW METHOD
+    def focus_prompt_tab(self):
         """Switches the main tab view to the LLM Prompt tab."""
         for i in range(self.main_tabs.count()):
             if self.main_tabs.tabText(i) == "🚀 LLM Prompt":
                 self.main_tabs.setCurrentIndex(i)
                 break
-
-    @Slot()
-    def open_settings(self):
-        actions.open_settings_action(self)
-    @Slot()
-    def generate_markdown(self):
-        actions.generate_markdown_action(self)
 
     @Slot()
     def open_settings(self):
@@ -418,13 +424,13 @@ class ProjectDocumenter(QMainWindow):
         self.markdown_preview_browser.setMarkdown(markdown_content)
     
     @Slot()
-    def _update_prompt_preview(self): # NEW METHOD
+    def _update_prompt_preview(self):
         """Generates and displays the final LLM prompt preview."""
         prompt_content = self._assemble_prompt()
         self.prompt_preview_browser.setText(prompt_content)
 
     @Slot()
-    def copy_prompt_to_clipboard(self): # NEW METHOD
+    def copy_prompt_to_clipboard(self):
         """Copies the content of the prompt preview browser to the clipboard."""
         from PySide6.QtGui import QClipboard
         clipboard = QApplication.clipboard()
@@ -451,11 +457,10 @@ class ProjectDocumenter(QMainWindow):
             self.key_files_table.setItem(row_count, 0, QTableWidgetItem(file_path))
             self.key_files_table.setItem(row_count, 1, QTableWidgetItem(""))
         self.key_files_table.resizeColumnsToContents()
-        self._save_project_state()
+        self._on_content_changed()
 
     @Slot()
     def _remove_selected_key_files(self):
-        """Removes the selected rows from the key_files_table."""
         selected_rows = sorted(list(set(index.row() for index in self.key_files_table.selectedIndexes())), reverse=True)
         if not selected_rows:
             QMessageBox.information(self, "Info", "Select a file in the table to remove.")
@@ -464,10 +469,10 @@ class ProjectDocumenter(QMainWindow):
         for row in selected_rows:
             self.key_files_table.removeRow(row)
 
-        self._save_project_state()
+        self._on_content_changed()
 
     def update_token_count(self):
-        prompt_chars = len(actions.assemble_final_prompt(self))
+        prompt_chars = len(self._assemble_prompt())
         log_chars = len(self.log_text_edit.toPlainText())
         description_chars = len(self.project_description_text_edit.toPlainText())
         code_chars = sum(len(item['content']) for item in content_utils.get_checked_content(self))
@@ -489,7 +494,7 @@ class ProjectDocumenter(QMainWindow):
         else:
             self.token_progress_bar.setVisible(False)
 
-    # --- Project Loading and Management (largely unchanged) ---
+    # --- Project Loading and Management ---
     @Slot()
     def show_welcome_or_load_project(self):
         path_to_load = sys.argv[1] if len(sys.argv) > 1 and os.path.isdir(sys.argv[1]) else None
@@ -518,15 +523,17 @@ class ProjectDocumenter(QMainWindow):
             if not self.worker_thread.wait(5000):
                 print("Warning: Worker thread did not terminate gracefully.")
 
-        # Normalize path separators to prevent duplicate entries from different path formats.
         normalized_path = os.path.normpath(path).replace(os.sep, '/')
         self.project_path = get_long_path_name(normalized_path)
         
         self.setWindowTitle(f"LLM-Sherpa - {os.path.basename(self.project_path)}")
         self.tree_model.clear(); self.tree_model.setHorizontalHeaderLabels(['Name', 'Type', 'Path'])
+        # Clear UI elements
         self.key_files_table.setRowCount(0)
         self.project_description_text_edit.clear()
         self.log_text_edit.clear()
+        self.template_list_widget.clear()
+
         self.config_manager.add_recent_project(self.project_path)
         self.update_recent_projects_menu()
 
@@ -550,7 +557,6 @@ class ProjectDocumenter(QMainWindow):
 
     @Slot()
     def _on_worker_finished(self):
-        """Slot to safely nullify worker and thread references after they are finished."""
         self.worker = None
         self.worker_thread = None
 
@@ -590,12 +596,11 @@ class ProjectDocumenter(QMainWindow):
 
     def on_loading_finished(self):
         self.loading_status_label.setText(""); self.set_ui_enabled(True)
-        if self.project_path:
-            if self.settings_manager.get("restore_tree_selection"):
-                tree_handler.restore_tree_state(self)
-            self._restore_project_state_components()
-        self._on_content_changed() # Initial update
+        if self.project_path and self.settings_manager.get("restore_tree_selection"):
+            self._restore_project_templates()
         self._is_loading_project = False
+        # Initial update after loading everything
+        self._on_content_changed()
 
     def set_ui_enabled(self, enabled):
         is_project_loaded = bool(self.project_path)
@@ -632,7 +637,7 @@ class ProjectDocumenter(QMainWindow):
         self.about_action.triggered.connect(self.show_about_dialog)
 
         self.generate_prompt_action = QAction(QIcon.fromTheme("document-send", self.style().standardIcon(QStyle.SP_CustomBase)), "🚀 &Generate Final Prompt", self)
-        self.generate_prompt_action.triggered.connect(self.focus_prompt_tab) # CHANGED
+        self.generate_prompt_action.triggered.connect(self.focus_prompt_tab)
         self.generate_prompt_action.setEnabled(False)
 
     def create_menu_bar(self):
@@ -686,32 +691,169 @@ class ProjectDocumenter(QMainWindow):
                 roles[file_item.text().strip()] = role_item.text().strip()
         return roles
 
-    def _restore_project_state_components(self):
-        state = self.config_manager.get("tree_states", {}).get(self.project_path, {})
+    # --- NEW AND REFACTORED STATE MANAGEMENT ---
+    def _get_full_ui_state(self):
+        """Captures the entire UI state for a template."""
+        prompt_studio_state = {
+            "selected_template": self.template_selector_combo.currentText(),
+            "module_values": {name: widget.toPlainText() for name, widget in self.prompt_module_widgets.items()}
+        }
         
-        # Restore Project Description
-        description = state.get("project_description", "")
-        self.project_description_text_edit.setPlainText(description)
+        state = tree_handler.get_tree_state(self)
+        state["component_roles"] = self._get_component_roles()
+        state["project_description"] = self.project_description_text_edit.toPlainText()
+        state["logs"] = self.log_text_edit.toPlainText()
+        state["prompt_studio"] = prompt_studio_state
+        return state
+
+    def _load_state_from_template(self, template_name, state_data):
+        """Loads the entire UI state from a template's data dictionary."""
+        self._is_switching_templates = True
         
-        # Restore Component Roles
-        roles = state.get("component_roles", {})
-        self.key_files_table.setRowCount(0)
-        for file_path, role in roles.items():
-            row_count = self.key_files_table.rowCount()
-            self.key_files_table.insertRow(row_count)
-            self.key_files_table.setItem(row_count, 0, QTableWidgetItem(file_path))
-            self.key_files_table.setItem(row_count, 1, QTableWidgetItem(role))
-        self.key_files_table.resizeColumnsToContents()
+        # Restore Tree and Components
+        if state_data:
+            tree_handler.restore_tree_state(self, state=state_data)
+            self.project_description_text_edit.setPlainText(state_data.get("project_description", ""))
+            self.log_text_edit.setPlainText(state_data.get("logs", ""))
+
+            roles = state_data.get("component_roles", {})
+            self.key_files_table.setRowCount(0)
+            for file_path, role in roles.items():
+                row_count = self.key_files_table.rowCount()
+                self.key_files_table.insertRow(row_count)
+                self.key_files_table.setItem(row_count, 0, QTableWidgetItem(file_path))
+                self.key_files_table.setItem(row_count, 1, QTableWidgetItem(role))
+            self.key_files_table.resizeColumnsToContents()
+            
+            # Restore Prompt Studio
+            prompt_state = state_data.get("prompt_studio", {})
+            self.template_selector_combo.setCurrentText(prompt_state.get("selected_template", ""))
+            # Let the UI update from the combo box signal, then set values
+            QApplication.processEvents()
+            for name, value in prompt_state.get("module_values", {}).items():
+                if name in self.prompt_module_widgets:
+                    self.prompt_module_widgets[name].setPlainText(value)
+        
+        self.active_template_name = template_name
+        
+        # Update UI to reflect the loaded template
+        for i in range(self.template_list_widget.count()):
+            item = self.template_list_widget.item(i)
+            if item.text() == template_name:
+                self.template_list_widget.setCurrentItem(item)
+                break
+                
+        self._is_switching_templates = False
+        # Manually trigger a final content update after loading
+        self.update_token_count()
+        self._update_markdown_preview()
+        self._update_prompt_preview()
+
+    def _restore_project_templates(self):
+        """Loads all templates for the current project and restores the last active one."""
+        project_data = self.config_manager.get("tree_states", {}).get(self.project_path, {})
+        
+        # Handle legacy single-state format by converting it
+        if "checked" in project_data or "expanded" in project_data:
+            self.templates = {"Default": project_data}
+            last_active = "Default"
+        else: # New multi-template format
+            self.templates = project_data.get("templates", {"Default": {}})
+            last_active = project_data.get("last_active_template", "Default")
+
+        self.template_list_widget.clear()
+        self.template_list_widget.addItems(sorted(self.templates.keys()))
+        
+        self.active_template_name = last_active
+        if self.active_template_name in self.templates:
+            self._load_state_from_template(self.active_template_name, self.templates[self.active_template_name])
+        else: # Fallback if last active was deleted
+            self.active_template_name = "Default"
+            self._load_state_from_template("Default", self.templates.get("Default", {}))
+
+    @Slot(QListWidgetItem, QListWidgetItem)
+    def _handle_template_selection_change(self, current, previous):
+        """Saves current state and loads the newly selected template."""
+        if self._is_switching_templates or not current:
+            return
+        
+        if previous:
+             # This will be saved automatically by _on_content_changed if any edits were made
+             # but we save it here to ensure the state is captured before switching.
+             self._save_current_state_to_active_template()
+        
+        new_template_name = current.text()
+        if new_template_name in self.templates:
+            self._load_state_from_template(new_template_name, self.templates[new_template_name])
+
+    @Slot()
+    def _prompt_and_save_new_template(self):
+        """Asks for a template name and saves the current state."""
+        template_name, ok = QInputDialog.getText(self, "Save Template", "Enter a name for this template:")
+        if ok and template_name:
+            if template_name in self.templates:
+                QMessageBox.warning(self, "Name Exists", "A template with this name already exists.")
+                return
+            
+            self.templates[template_name] = self._get_full_ui_state()
+            self.active_template_name = template_name
+            
+            # Update UI list
+            self.template_list_widget.addItem(template_name)
+            self.template_list_widget.setCurrentRow(self.template_list_widget.count() - 1)
+            
+            self._save_project_state()
+
+    @Slot()
+    def _delete_selected_template(self):
+        """Deletes the selected template from the list."""
+        current_item = self.template_list_widget.currentItem()
+        if not current_item:
+            QMessageBox.information(self, "Info", "Select a template to delete.")
+            return
+
+        template_name = current_item.text()
+        if template_name == "Default":
+            QMessageBox.warning(self, "Cannot Delete", "The 'Default' template cannot be deleted.")
+            return
+
+        reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete the template '{template_name}'?")
+        if reply == QMessageBox.Yes:
+            if template_name in self.templates:
+                del self.templates[template_name]
+            
+            row = self.template_list_widget.row(current_item)
+            self.template_list_widget.takeItem(row)
+            
+            # If we deleted the active template, load the default one
+            if self.active_template_name == template_name:
+                self._load_state_from_template("Default", self.templates.get("Default", {}))
+
+            self._save_project_state()
+
+    def _save_current_state_to_active_template(self):
+        """Helper to save the current UI state into the active template's slot in memory."""
+        if not self.project_path or self._is_loading_project or self._is_switching_templates:
+            return
+        
+        if not self.active_template_name:
+            self.active_template_name = "Default"
+            
+        self.templates[self.active_template_name] = self._get_full_ui_state()
 
     def _save_project_state(self):
+        """Saves the entire template structure for the project to config.json."""
         if not self.project_path or not self.settings_manager.get("restore_tree_selection"):
             return
 
+        self._save_current_state_to_active_template()
+
         tree_states = self.config_manager.get("tree_states", {})
-        current_state = tree_handler.get_tree_state(self)
-        current_state["component_roles"] = self._get_component_roles()
-        current_state["project_description"] = self.project_description_text_edit.toPlainText()
-        tree_states[self.project_path] = current_state
+        project_data = {
+            "last_active_template": self.active_template_name,
+            "templates": self.templates
+        }
+        tree_states[self.project_path] = project_data
 
         self.config_manager.set("tree_states", tree_states)
         self.config_manager.save_config()
