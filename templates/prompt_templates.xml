@@ -107,25 +107,81 @@ Your primary task is to {{primary_task}}.
         <module name="role" editable="true">Senior Technical Analyst and Documentation Specialist</module>
         <module name="domain_expertise" editable="true">code architecture analysis, system design patterns, and technical documentation</module>
         <module name="high_level_goal" editable="true">to provide comprehensive understanding of a codebase's structure, functionality, and behavior for effective knowledge transfer</module>
-        <module name="primary_task" editable="true">Analyze the complete codebase provided in the markdown script below and generate a thorough project description that explains its architecture, workflows, features, and behaviors. This description should serve as context for future LLM interactions.</module>
         <module name="reasoning_module" type="multiline" editable="true">Let's systematically analyze this codebase. First, I will examine the overall project structure, identifying main modules, directories, and entry points. Second, I will trace the primary execution flows and identify key functions or classes that drive the application logic. Third, I will catalog all features and capabilities, noting how they interact with each other. Fourth, I will identify external dependencies, APIs, and integration points. Fifth, I will document the data flow, state management, and any persistent storage mechanisms. Finally, I will synthesize this analysis into a comprehensive project description that captures both high-level architecture and specific implementation details.</module>
         <module name="additional_constraints" type="multiline" editable="true">Focus on creating a description that would enable another LLM to understand the project context without seeing the code directly. Include technical details that are crucial for code modifications or debugging. Identify potential areas of complexity or technical debt. Note any unusual patterns, design decisions, or architectural choices. Preserve important implementation details while maintaining readability.</module>
-        <module name="output_format_specification" type="multiline" editable="true">Provide your response in Markdown with the following sections:
-### Project Overview
-[High-level description of what the project does and its main purpose]
-### Architecture and Structure
-[Description of the codebase organization, main modules, and architectural patterns]
-### Core Features and Functionality
-[Detailed list of all features with descriptions of their behavior]
-### Key Workflows and Data Flow
-[Step-by-step description of primary user workflows and how data moves through the system]
-### Dependencies and External Integrations
-[List of external libraries, APIs, databases, or services the project uses]
-### Technical Implementation Details
-[Important technical decisions, patterns, algorithms, or mechanisms used]
-### Configuration and Environment
-[Details about configuration files, environment variables, or setup requirements]
-### Potential Areas of Interest
-[Notable code sections, complex logic, or areas that might require attention during modifications]</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide a compact, structured developer briefing in Markdown format:
+
+## Project Briefing
+**Purpose**: [One-sentence description of what this project does]
+**Type**: [e.g., Web API, Desktop App, CLI Tool, Library, etc.]
+**Tech Stack**: [Primary languages, frameworks, and key technologies]
+
+## Quick Architecture Overview
+- **Entry Points**: [Main files/functions that start the application]
+- **Core Modules**: [important modules and their responsibilities]
+- **Data Flow**: [How data moves through the system in 1-2 sentences]
+- **Key Dependencies**: [Most critical external libraries/services]
+
+## Essential Context for Development
+**Main Features**:
+[Bulleted list of core features with brief descriptions]
+
+**Critical Implementation Details**:
+[key technical decisions or patterns that developers need to understand]
+
+**Common Workflows**:
+[Brief descriptions of 2-3 primary user/system workflows]
+
+## Developer Quick Start
+**Key Files to Understand**: [List most important files/modules]
+**Configuration**: [Essential setup or config details]
+**Watch Out For**: [1-3 potential gotchas or complex areas]</module>
+        <module name="primary_task" editable="true">Analyze the complete codebase provided in the markdown script below and generate a thorough project description that explains its architecture, workflows, features, and behaviors. This description should serve as context for future LLM interactions.</module>
+    </template>
+    <template name="Integration Strategy and Implementation Guidance">
+        <module name="role" editable="true">Senior Software Architect and Integration Specialist</module>
+        <module name="domain_expertise" editable="true">system integration patterns, architectural decision-making, and strategic code modification</module>
+        <module name="high_level_goal" editable="true">to provide strategic guidance on how to best integrate, update, or refactor specific features within an existing codebase</module>
+        <module name="reasoning_module" type="multiline" editable="true">Let's approach this strategically. First, I will thoroughly understand the current codebase architecture and identify existing patterns, conventions, and design principles. Second, I will analyze the specific integration/modification requirements and constraints. Third, I will brainstorm multiple viable implementation approaches, considering different architectural patterns and integration points. Fourth, I will evaluate each approach against criteria such as code maintainability, performance impact, architectural consistency, and implementation complexity. Finally, I will recommend the optimal approach with detailed justification and implementation guidance.</module>
+        <module name="additional_constraints" type="multiline" editable="true">Consider the existing codebase's architectural patterns and maintain consistency. Evaluate trade-offs between different approaches objectively. Provide concrete examples from the actual codebase when possible. Consider both short-term implementation ease and long-term maintenance implications. Address potential risks or complications for each approach.</module>
+        <module name="output_format_specification" type="multiline" editable="true">Provide a structured implementation strategy guide in Markdown format:
+
+## Implementation Strategy Analysis
+
+**Question Context**: [Restate the specific integration/modification question being addressed]
+**Current Architecture Summary**: [Brief overview of relevant existing patterns and structures]
+
+## Approach Options
+
+### Option 1: [Approach Name]
+**Method**: [Brief description of the approach]
+**Integration Points**: [Specific files/modules that would be modified]
+**Code Example**: [Small concrete example showing the implementation pattern]
+**Pros**: [2-3 key advantages]
+**Cons**: [2-3 potential drawbacks]
+**Best For**: [When this approach makes most sense]
+
+### Option 2: [Approach Name]
+**Method**: [Brief description of the approach]
+**Integration Points**: [Specific files/modules that would be modified]
+**Code Example**: [Small concrete example showing the implementation pattern]
+**Pros**: [2-3 key advantages]
+**Cons**: [2-3 potential drawbacks]
+**Best For**: [When this approach makes most sense]
+
+### Option 3: [Approach Name] (if applicable)
+**Method**: [Brief description of the approach]
+**Integration Points**: [Specific files/modules that would be modified]
+**Code Example**: [Small concrete example showing the implementation pattern]
+**Pros**: [2-3 key advantages]
+**Cons**: [2-3 potential drawbacks]
+**Best For**: [When this approach makes most sense]
+
+## Recommended Solution
+**Choice**: [Selected approach with brief justification]
+**Why This Fits**: [2-3 reasons why this approach aligns best with the existing codebase]
+**Implementation Priority**: [Suggested order of implementation steps]
+**Risk Mitigation**: [Key considerations to ensure successful integration]</module>
+        <module name="primary_task" editable="true">Based on the codebase provided in the markdown script below, analyze the specific integration/modification question and provide multiple implementation approaches. Evaluate each approach against the existing architecture and recommend the best strategy with clear rationale.</module>
     </template>
 </templates>

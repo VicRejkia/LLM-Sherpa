@@ -212,9 +212,25 @@ class ProjectDocumenter(QMainWindow):
 
         self.components_tab = QWidget()
         components_layout = QVBoxLayout(self.components_tab)
+        
+        # --- NEW Project Description Section ---
+        components_layout.addWidget(QLabel("<b>📝 Project Description:</b>"))
+        description_hint_label = QLabel("Use the `Codebase Analysis and Documentation` prompt-template, copy the Prompt to your LLM chatbox and upload the markdown file.")
+        description_hint_label.setWordWrap(True)
+        description_hint_label.setStyleSheet("padding: 5px; border: 1px solid #444; border-radius: 4px; background-color: #333;")
+        components_layout.addWidget(description_hint_label)
+        self.project_description_text_edit = QTextEdit()
+        self.project_description_text_edit.setAcceptRichText(False)
+        self.project_description_text_edit.setPlaceholderText("Paste the markdown-formatted project description here...")
+        self.project_description_text_edit.setMinimumHeight(80)
+        components_layout.addWidget(self.project_description_text_edit, 1)
+        components_layout.addSpacing(15)
+        # --- END NEW Section ---
+        
         self.preamble_checkbox = QCheckBox("Generate 'Table of Contents' Preamble")
         self.preamble_checkbox.setChecked(True)
         components_layout.addWidget(self.preamble_checkbox)
+        
         components_layout.addWidget(QLabel("<b>Key Files & Roles (for Project Context):</b>"))
         self.key_files_table = QTableWidget(0, 2)
         self.key_files_table.setHorizontalHeaderLabels(["File", "Role/Description"])
@@ -252,6 +268,7 @@ class ProjectDocumenter(QMainWindow):
         self.tree_view.selectionModel().selectionChanged.connect(self.on_tree_selection_changed)
         self.tree_model.itemChanged.connect(self.on_item_changed)
         self.log_text_edit.textChanged.connect(self._on_content_changed)
+        self.project_description_text_edit.textChanged.connect(self._on_content_changed)
         self.key_files_table.itemChanged.connect(self._on_content_changed)
         self.token_budget_combo.currentTextChanged.connect(self.update_token_count)
         self.preamble_checkbox.stateChanged.connect(self._on_content_changed)
@@ -452,8 +469,9 @@ class ProjectDocumenter(QMainWindow):
     def update_token_count(self):
         prompt_chars = len(actions.assemble_final_prompt(self))
         log_chars = len(self.log_text_edit.toPlainText())
+        description_chars = len(self.project_description_text_edit.toPlainText())
         code_chars = sum(len(item['content']) for item in content_utils.get_checked_content(self))
-        estimated_tokens = int((prompt_chars + log_chars + code_chars) / 4)
+        estimated_tokens = int((prompt_chars + log_chars + code_chars + description_chars) / 4)
         self.token_count_label.setText(f"Size: ~{estimated_tokens:,} tokens")
 
         budgets = self.settings_manager.get("llm_token_budgets", {})
@@ -504,6 +522,7 @@ class ProjectDocumenter(QMainWindow):
         self.setWindowTitle(f"LLM-Sherpa - {os.path.basename(self.project_path)}")
         self.tree_model.clear(); self.tree_model.setHorizontalHeaderLabels(['Name', 'Type', 'Path'])
         self.key_files_table.setRowCount(0)
+        self.project_description_text_edit.clear()
         self.log_text_edit.clear()
         self.config_manager.add_recent_project(self.project_path)
         self.update_recent_projects_menu()
@@ -571,7 +590,7 @@ class ProjectDocumenter(QMainWindow):
         if self.project_path:
             if self.settings_manager.get("restore_tree_selection"):
                 tree_handler.restore_tree_state(self)
-            self._restore_component_roles()
+            self._restore_project_state_components()
         self._on_content_changed() # Initial update
         self._is_loading_project = False
 
@@ -664,8 +683,14 @@ class ProjectDocumenter(QMainWindow):
                 roles[file_item.text().strip()] = role_item.text().strip()
         return roles
 
-    def _restore_component_roles(self):
+    def _restore_project_state_components(self):
         state = self.config_manager.get("tree_states", {}).get(self.project_path, {})
+        
+        # Restore Project Description
+        description = state.get("project_description", "")
+        self.project_description_text_edit.setPlainText(description)
+        
+        # Restore Component Roles
         roles = state.get("component_roles", {})
         self.key_files_table.setRowCount(0)
         for file_path, role in roles.items():
@@ -682,6 +707,7 @@ class ProjectDocumenter(QMainWindow):
         tree_states = self.config_manager.get("tree_states", {})
         current_state = tree_handler.get_tree_state(self)
         current_state["component_roles"] = self._get_component_roles()
+        current_state["project_description"] = self.project_description_text_edit.toPlainText()
         tree_states[self.project_path] = current_state
 
         self.config_manager.set("tree_states", tree_states)
