@@ -518,7 +518,10 @@ class ProjectDocumenter(QMainWindow):
             if not self.worker_thread.wait(5000):
                 print("Warning: Worker thread did not terminate gracefully.")
 
-        self.project_path = get_long_path_name(path)
+        # Normalize path separators to prevent duplicate entries from different path formats.
+        normalized_path = os.path.normpath(path).replace(os.sep, '/')
+        self.project_path = get_long_path_name(normalized_path)
+        
         self.setWindowTitle(f"LLM-Sherpa - {os.path.basename(self.project_path)}")
         self.tree_model.clear(); self.tree_model.setHorizontalHeaderLabels(['Name', 'Type', 'Path'])
         self.key_files_table.setRowCount(0)
