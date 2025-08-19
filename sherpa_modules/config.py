@@ -28,6 +28,7 @@ class SettingsManager:
             "show_project_structure": True,
             "remember_project_path": True,
             "restore_tree_selection": True,
+            "include_all_files": False,
             "llm_token_budgets": {
                 "GPT-4 (8k)": 8192,
                 "GPT-4 Turbo (128k)": 128000,

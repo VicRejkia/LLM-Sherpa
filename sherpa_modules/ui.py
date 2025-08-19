@@ -34,8 +34,13 @@ class SettingsWindow(QDialog):
         layout.addWidget(QLabel("\n<b>File Scanning:</b>"))
         self.exclude_dotfiles_chk = QCheckBox("Exclude all files and folders starting with '.'", checked=self.settings_manager.get("exclude_dotfiles"))
         layout.addWidget(self.exclude_dotfiles_chk)
+        self.include_all_files_checkbox = QCheckBox("Include all file types in project tree")
+        current_value = self.settings_manager.get("include_all_files", False)
+        self.include_all_files_checkbox.setChecked(current_value)
+        layout.addWidget(self.include_all_files_checkbox)
         layout.addStretch()
         tabs.addTab(general_tab, "General")
+        
 
         # Tab 2: Exclusions & Mappings
         exclusions_tab = QWidget()
@@ -68,6 +73,7 @@ class SettingsWindow(QDialog):
         self.settings_manager.set("show_project_structure", self.show_structure_chk.isChecked())
         self.settings_manager.set("exclude_dotfiles", self.exclude_dotfiles_chk.isChecked())
         self.settings_manager.set("exclude_list", [item.strip() for item in self.exclude_text.toPlainText().strip().split("\n") if item.strip()])
+        self.settings_manager.set("include_all_files", self.include_all_files_checkbox.isChecked())
         
         try:
             self.settings_manager.set("extension_map", json.loads(self.ext_map_text.toPlainText()))

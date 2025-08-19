@@ -159,6 +159,7 @@ class ProjectDocumenter(QMainWindow):
         btn_clean_timestamps = QPushButton("Rm Timestamps"); btn_clean_timestamps.clicked.connect(self.clean_logs_timestamps); log_toolbar.addWidget(btn_clean_timestamps)
         btn_clean_ansi = QPushButton("Strip ANSI"); btn_clean_ansi.clicked.connect(self.clean_logs_ansi); log_toolbar.addWidget(btn_clean_ansi)
         btn_collapse_dups = QPushButton("Collapse Duplicates"); btn_collapse_dups.clicked.connect(self.collapse_duplicates); log_toolbar.addWidget(btn_collapse_dups)
+        btn_clear_logs = QPushButton("❌ Clear"); btn_clear_logs.clicked.connect(self.clear_logs); log_toolbar.addWidget(btn_clear_logs)
         log_layout.addLayout(log_toolbar)
         self.log_text_edit = QTextEdit()
         log_layout.addWidget(self.log_text_edit)
@@ -412,6 +413,11 @@ class ProjectDocumenter(QMainWindow):
     @Slot()
     def collapse_duplicates(self):
         actions.collapse_duplicates_action(self.log_text_edit)
+
+    @Slot()
+    def clear_logs(self):
+        """Clears the content of the log text edit."""
+        self.log_text_edit.clear()
 
     @Slot(QStandardItem)
     def on_item_changed(self, item):

@@ -1,138 +1,164 @@
 import os
 import sys
-import ctypes
-from ctypes import wintypes
 import ast
+from PySide6.QtCore import QObject, Signal
 
-from PySide6.QtCore import QObject, Signal, Slot
+# --- Long Path Handling Utility ---
+def get_long_path_name(path):
+    """Converts a path to its long path representation if on Windows."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            _GetLongPathNameW = ctypes.windll.kernel32.GetLongPathNameW
+            _GetLongPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+            _GetLongPathNameW.restype = wintypes.DWORD
+            buffer_size = _GetLongPathNameW(path, None, 0)
+            if buffer_size == 0: return path
+            buffer = ctypes.create_unicode_buffer(buffer_size)
+            if _GetLongPathNameW(path, buffer, buffer_size) == 0: return path
+            return buffer.value
+        except (ImportError, AttributeError):
+            return path
+    return path
 
-def get_long_path_name(short_path):
-    if sys.platform != 'win32': return short_path
-    try:
-        _GetLongPathNameW = ctypes.windll.kernel32.GetLongPathNameW
-        _GetLongPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
-        _GetLongPathNameW.restype = wintypes.DWORD
-        buffer_size = _GetLongPathNameW(short_path, None, 0)
-        if buffer_size == 0: return short_path
-        long_path_buffer = ctypes.create_unicode_buffer(buffer_size)
-        result = _GetLongPathNameW(short_path, long_path_buffer, buffer_size)
-        return long_path_buffer.value if result > 0 else short_path
-    except Exception:
-        return short_path
+# --- FileSystem Worker Class ---
 
 class FileSystemWorker(QObject):
+    """
+    A worker that scans a project directory, parses Python files for structure (classes/functions),
+    and builds a list of all items for the tree view.
+    """
     results_ready = Signal(list)
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, path, settings):
+    def __init__(self, project_path, settings):
         super().__init__()
-        self.project_path = path
+        self.project_path = project_path
         self.settings = settings
-        self.is_running = True
+        self._is_running = True
 
-    @Slot()
+    def stop(self):
+        """Stops the worker gracefully."""
+        self._is_running = False
+
     def run(self):
+        """
+        High-level method to start the scan and emit signals.
+        """
         try:
-            results = []
-            self._scan_directory(self.project_path, '.', results)
-            if self.is_running: self.results_ready.emit(results)
+            items_data = list(self._scan_directory(self.project_path))
+            if self._is_running:
+                self.results_ready.emit(items_data)
         except Exception as e:
-            if self.is_running: self.error.emit(f"An unexpected error occurred: {e}")
+            self.error.emit(f"An error occurred during the scan: {str(e)}")
         finally:
             self.finished.emit()
 
-    def _parse_python_file(self, full_path, file_rel_path, results):
+    def _parse_python_file(self, file_full_path, file_rel_path):
         """
-        BUG FIX: Rewritten for robust AST parsing.
-        This version wraps the child node iteration in a try-except block to handle
-        node types that are not iterable (e.g., BinOp, Constant), fixing the console errors.
+        Parses a single Python file to find top-level classes and functions using AST.
+        It yields a dictionary for the file itself, then for each class and function found.
         """
+        if not self._is_running: return
+
+        # First, yield the file item itself
+        parent_rel_path = os.path.dirname(file_rel_path) or '.'
+        yield {
+            'id': file_rel_path,
+            'parent_id': parent_rel_path,
+            'name': os.path.basename(file_full_path),
+            'type': 'file',
+            'rel_path': file_rel_path,
+            'full_path': file_full_path,
+        }
+
+        # Now, parse the file for classes and functions
         try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                source = f.read()
-            tree = ast.parse(source)
+            with open(file_full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
             
-            node_parents = {}
-            for node in ast.walk(tree):
-                # This try-except block makes the AST parsing much more robust.
-                try:
-                    for child in ast.iter_child_nodes(node):
-                        node_parents[child] = node
-                except TypeError:
-                    # Some node types like BinOp, Constant, etc., are not iterable
-                    continue
-
-            for node in ast.walk(tree):
-                parent_id = file_rel_path 
-
-                if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
-                    parent_node = node_parents.get(node)
-                    while parent_node:
-                        if isinstance(parent_node, ast.ClassDef):
-                            parent_id = f"{file_rel_path}::{parent_node.name}"
-                            break
-                        parent_node = node_parents.get(parent_node)
-
+            tree = ast.parse(content)
+            for node in tree.body:
+                if not self._is_running: return
+                
+                # Check for top-level class definitions
                 if isinstance(node, ast.ClassDef):
-                    results.append({
-                        'name': node.name, 'full_path': full_path,
-                        'id': f"{file_rel_path}::{node.name}", 'parent_id': parent_id,
-                        'rel_path': "", 'type': 'class', 'is_dir': False,
-                        'start_line': node.lineno, 'end_line': node.end_lineno
-                    })
-                elif isinstance(node, ast.FunctionDef):
-                    func_id = f"{parent_id}::{node.name}" if parent_id != file_rel_path else f"{file_rel_path}::{node.name}"
-                    results.append({
-                        'name': node.name, 'full_path': full_path,
-                        'id': func_id, 'parent_id': parent_id,
-                        'rel_path': "", 'type': 'function', 'is_dir': False,
-                        'start_line': node.lineno, 'end_line': node.end_lineno
-                    })
-        except Exception as e:
-            print(f"Could not parse AST for {full_path}: {e}")
-
-
-    def _scan_directory(self, current_path, parent_id, results):
-        if not self.is_running: return
-            
-        exclude_list = self.settings.get("exclude_list", [])
-        exclude_dotfiles = self.settings.get("exclude_dotfiles", True)
-        extension_map = self.settings.get("extension_map", {})
-
-        try:
-            items = sorted(os.listdir(current_path))
-        except (PermissionError, FileNotFoundError): return
-
-        for name in items:
-            if not self.is_running: break
-            if name in exclude_list or (exclude_dotfiles and name.startswith('.')): continue
-
-            full_path = os.path.join(current_path, name)
-            rel_path = os.path.relpath(full_path, self.project_path).replace(os.sep, '/')
-            is_dir = os.path.isdir(full_path)
-
-            # BUG FIX: Ensure correct parent_id for files in the root directory.
-            # If the current_path is the project_path, the parent is the root ('.').
-            # Otherwise, it's the relative path of the directory.
-            item_parent_id = '.' if current_path == self.project_path else os.path.relpath(current_path, self.project_path).replace(os.sep, '/')
-
-            if is_dir:
-                results.append({
-                    'name': name, 'full_path': full_path, 'rel_path': rel_path,
-                    'id': rel_path, 'parent_id': item_parent_id, 'type': 'folder', 'is_dir': True
-                })
-                self._scan_directory(full_path, rel_path, results)
-            else:
-                _, ext = os.path.splitext(name)
-                if ext.lower() in extension_map:
-                    file_item_data = {
-                        'name': name, 'full_path': full_path, 'rel_path': rel_path,
-                        'id': rel_path, 'parent_id': item_parent_id, 'type': 'file', 'is_dir': False
+                    yield {
+                        'id': f"{file_rel_path}/{node.name}",
+                        'parent_id': file_rel_path,
+                        'name': node.name,
+                        'type': 'class',
+                        'rel_path': file_rel_path, # Path of the containing file
+                        'full_path': file_full_path,
+                        'start_line': node.lineno,
                     }
-                    results.append(file_item_data)
-                    if ext.lower() == '.py':
-                        self._parse_python_file(full_path, rel_path, results)
 
-    def stop(self):
-        self.is_running = False
+                # Check for top-level function definitions
+                elif isinstance(node, ast.FunctionDef):
+                    yield {
+                        'id': f"{file_rel_path}/{node.name}",
+                        'parent_id': file_rel_path,
+                        'name': node.name,
+                        'type': 'function',
+                        'rel_path': file_rel_path, # Path of the containing file
+                        'full_path': file_full_path,
+                        'start_line': node.lineno,
+                    }
+        except (SyntaxError, UnicodeDecodeError, OSError) as e:
+            # If a file can't be parsed, just ignore its contents and move on
+            print(f"Warning: Could not parse {file_rel_path}: {e}")
+            pass
+
+    def _scan_directory(self, path):
+        """
+        Recursively scans a directory. It yields dictionaries for each folder and file.
+        For Python files, it delegates to _parse_python_file.
+        """
+        include_all = self.settings.get("include_all_files", False)
+        ignored_dirs = set(self.settings.get("ignored_dirs", []))
+        allowed_extensions = set(self.settings.get("allowed_extensions", []))
+
+        for entry in os.scandir(path):
+            if not self._is_running: return
+
+            if entry.is_dir():
+                if entry.name in ignored_dirs:
+                    continue
+                
+                dir_full_path = entry.path
+                dir_rel_path = os.path.relpath(dir_full_path, self.project_path).replace(os.sep, '/')
+                parent_rel_path = os.path.dirname(dir_rel_path) or '.'
+                
+                yield {
+                    'id': dir_rel_path,
+                    'parent_id': parent_rel_path,
+                    'name': entry.name,
+                    'type': 'folder',
+                    'rel_path': dir_rel_path,
+                    'full_path': dir_full_path,
+                }
+                # Recurse into the subdirectory
+                yield from self._scan_directory(dir_full_path)
+
+            elif entry.is_file():
+                file_full_path = entry.path
+                file_rel_path = os.path.relpath(file_full_path, self.project_path).replace(os.sep, '/')
+                file_ext = os.path.splitext(entry.name)[1].lower()
+
+                # Check if it's a Python file to be parsed
+                if file_ext == '.py':
+                    yield from self._parse_python_file(file_full_path, file_rel_path)
+                
+                # For all other files, check against settings
+                elif include_all or file_ext in allowed_extensions:
+                    parent_rel_path = os.path.dirname(file_rel_path) or '.'
+                    yield {
+                        'id': file_rel_path,
+                        'parent_id': parent_rel_path,
+                        'name': entry.name,
+                        'type': 'file',
+                        'rel_path': file_rel_path,
+                        'full_path': file_full_path,
+                    }

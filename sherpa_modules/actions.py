@@ -97,6 +97,12 @@ def open_settings_action(main_window):
     """Opens the settings dialog and refreshes the UI if settings are changed."""
     dialog = SettingsWindow(main_window.settings_manager, main_window)
     if dialog.exec():
+        main_window.settings_manager.save_settings()
+        QMessageBox.information(
+            main_window,
+            "Settings Saved",
+            "Your settings have been saved. Some changes may require a project refresh to take effect."
+        )
         main_window.token_budget_combo.clear()
         main_window.token_budget_combo.addItems(["No Budget"] + list(main_window.settings_manager.get("llm_token_budgets", {}).keys()))
         if main_window.project_path:
