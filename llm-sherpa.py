@@ -36,7 +36,7 @@ except ImportError:
 class ProjectDocumenter(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LLM-Sherpa - Project Documenter v4.0")
+        self.setWindowTitle("LLM-Sherpa - Project Documenter v1.5")
         self.setGeometry(100, 100, 1400, 950)
 
         self.settings_manager = SettingsManager()
@@ -686,7 +686,7 @@ class ProjectDocumenter(QMainWindow):
 
     @Slot()
     def show_about_dialog(self):
-        QMessageBox.about(self, "About LLM-Sherpa", "<h2>LLM-Sherpa v4.0</h2><p>An intelligent project briefing and context generation tool.</p>")
+        QMessageBox.about(self, "About LLM-Sherpa", "<h2>LLM-Sherpa v1.5</h2><p>An intelligent project briefing and context generation tool.</p>")
 
     def _get_component_roles(self):
         roles = {}
