@@ -3,7 +3,11 @@ from PySide6.QtCore import Qt
 def get_tree_state(main_window):
     """Captures the checked and expanded states of the tree view."""
     checked_ids, expanded_ids = [], []
-    root = main_window.tree_model.invisibleRootItem()
+    
+    # --- FIXED ---
+    tree_model = main_window.project_view.model()
+    tree_view = main_window.project_view.view()
+    root = tree_model.invisibleRootItem()
     
     def recurse(parent_item):
         for row in range(parent_item.rowCount()):
@@ -14,7 +18,7 @@ def get_tree_state(main_window):
                 item_id = item_data.get('id')
                 if item.checkState() in (Qt.CheckState.Checked, Qt.CheckState.PartiallyChecked):
                     checked_ids.append(item_id)
-                if item.hasChildren() and main_window.tree_view.isExpanded(item.index()):
+                if item.hasChildren() and tree_view.isExpanded(item.index()):
                     expanded_ids.append(item_id)
             
             if item.hasChildren():
@@ -26,41 +30,41 @@ def get_tree_state(main_window):
 def restore_tree_state(main_window, state=None):
     """Restores the checked and expanded states from a state dictionary or the config."""
     if state is None:
-        # Fallback to old behavior if no state is passed directly
         state = main_window.config_manager.get("tree_states", {}).get(main_window.project_path)
     
     if not state: return
+    
+    # --- FIXED ---
+    tree_model = main_window.project_view.model()
+    tree_view = main_window.project_view.view()
     
     main_window._is_updating_checks = True
     checked_set = set(state.get("checked", []))
     expanded_set = set(state.get("expanded", []))
     
-    q = [main_window.tree_model.invisibleRootItem()]
+    q = [tree_model.invisibleRootItem()]
     while q:
         parent_item = q.pop(0)
         for row in range(parent_item.rowCount()):
             item = parent_item.child(row, 0)
             if not item: continue
-            # Reset check state before applying the new one
             item.setCheckState(Qt.CheckState.Unchecked)
             item_data = item.data(Qt.UserRole)
             if item_data:
                 item_id = item_data.get('id')
                 if item_id in checked_set:
                     item.setCheckState(Qt.CheckState.Checked)
-                # Collapse all first, then expand only the saved ones
-                if main_window.tree_view.isExpanded(item.index()):
-                    main_window.tree_view.collapse(item.index())
+                if tree_view.isExpanded(item.index()):
+                    tree_view.collapse(item.index())
                 if item_id in expanded_set:
-                    main_window.tree_view.expand(item.index())
+                    tree_view.expand(item.index())
 
             if item.hasChildren():
                 q.append(item)
     
     main_window._is_updating_checks = False
     
-    # Update ancestor states after restoring
-    root = main_window.tree_model.invisibleRootItem()
+    root = tree_model.invisibleRootItem()
     for row in range(root.rowCount()):
         child_item = root.child(row, 0)
         if child_item:

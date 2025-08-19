@@ -25,6 +25,10 @@ def get_checked_content(main_window):
     """
     content_map = {}
     processed_item_ids = set()
+    
+    # --- FIXED ---
+    # Access the model from the project_view component
+    tree_model = main_window.project_view.model()
 
     def get_all_descendant_ids(item):
         descendant_ids = set()
@@ -38,8 +42,9 @@ def get_checked_content(main_window):
             if child.hasChildren():
                 q.extend(child.child(i, 0) for i in range(child.rowCount()))
         return descendant_ids
-
-    q = [main_window.tree_model.invisibleRootItem().child(i, 0) for i in range(main_window.tree_model.rowCount())]
+    
+    # --- FIXED ---
+    q = [tree_model.invisibleRootItem().child(i, 0) for i in range(tree_model.rowCount())]
     
     while q:
         item = q.pop(0)

@@ -9,10 +9,12 @@ from .ui import SettingsWindow
 def assemble_codebase_markdown(main_window):
     """Assembles the markdown content for the project codebase context."""
     selected_content = get_checked_content(main_window)
-    log_content = main_window.log_text_edit.toPlainText().strip()
-    component_roles = main_window._get_component_roles()
+    # --- FIXED ---
+    # Access UI elements through their respective component managers
+    log_content = main_window.log_view.toPlainText().strip()
+    component_roles = main_window.workspace_manager.get_component_roles()
     project_name = os.path.basename(main_window.project_path) if main_window.project_path else "Project"
-    project_description = main_window.project_description_text_edit.toPlainText().strip()
+    project_description = main_window.workspace_manager.project_description_text_edit.toPlainText().strip()
 
     has_any_context = bool(selected_content or log_content or project_description)
     if not has_any_context:
@@ -24,7 +26,7 @@ def assemble_codebase_markdown(main_window):
 
         context_f.write(f"## 📚 Project Context: `{project_name}`\n\n")
 
-        if main_window.preamble_checkbox.isChecked() and selected_content:
+        if main_window.workspace_manager.preamble_checkbox.isChecked() and selected_content:
             preamble = generate_preamble(selected_content)
             context_f.write(preamble + "\n\n")
 
@@ -68,7 +70,7 @@ def assemble_final_prompt(main_window):
     return prompt_text.strip()
 
 def save_codebase_markdown_action(main_window):
-    """Handles generating and saving the codebase_context.md file."""
+    """Handles generating and saving the codebase_files.md file."""
     markdown_content = assemble_codebase_markdown(main_window)
     
     if not markdown_content:
@@ -76,7 +78,7 @@ def save_codebase_markdown_action(main_window):
         return
 
     project_name = os.path.basename(main_window.project_path) if main_window.project_path else "Project"
-    default_filename = f"{project_name}_codebase_context.md"
+    default_filename = f"{project_name}_files.md"
     output_file, _ = QFileDialog.getSaveFileName(
         main_window,
         "Save Codebase Context File",
@@ -110,7 +112,10 @@ def open_settings_action(main_window):
 
 def toggle_all_selections_action(main_window):
     """Checks or unchecks all top-level items in the project tree."""
-    root = main_window.tree_model.invisibleRootItem()
+    # --- FIXED ---
+    tree_model = main_window.project_view.model()
+    root = tree_model.invisibleRootItem()
+
     if root.rowCount() > 0:
         is_any_not_fully_checked = any(root.child(i, 0).checkState() != Qt.CheckState.Checked for i in range(root.rowCount()))
         new_state = Qt.CheckState.Checked if is_any_not_fully_checked else Qt.CheckState.Unchecked
@@ -124,8 +129,6 @@ def toggle_all_selections_action(main_window):
         main_window._is_updating_checks = False
         
         main_window._on_content_changed()
-
-import re
 
 def clean_logs_timestamps_action(text_edit):
     """Removes various timestamp formats from the start of log lines."""
