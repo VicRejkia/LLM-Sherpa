@@ -19,11 +19,12 @@ from PySide6.QtCore import Qt, Slot, QThread, QTimer
 # --- Local Module Imports ---
 from sherpa_modules.config import SettingsManager, ConfigManager
 from sherpa_modules.worker import FileSystemWorker, get_long_path_name
-from sherpa_modules.ui import WelcomeDialog
+from sherpa_modules.ui import WelcomeDialog, DocumentationViewer # MODIFIED
 from sherpa_modules import actions, tree_handler, content_utils
 from sherpa_modules.components.project_view import ProjectView
 from sherpa_modules.components.log_view import LogView
 from sherpa_modules.components.workspace_manager import WorkspaceManager
+from sherpa_modules.app_info import APP_NAME, APP_VERSION, ABOUT_TEXT # NEW
 
 class ProjectDocumenter(QMainWindow):
     def __init__(self):
@@ -38,6 +39,7 @@ class ProjectDocumenter(QMainWindow):
         self._is_loading_project = False
         self.prompt_templates = {}
         self.master_template = ""
+        self.doc_viewer = None
 
         self.worker = None
         self.worker_thread = None
@@ -403,8 +405,10 @@ class ProjectDocumenter(QMainWindow):
         self.exit_action = QAction("E&xit", self, triggered=self.close)
         self.toggle_all_action = QAction("&Toggle All Selections", self, triggered=self.toggle_all_selections)
         self.settings_action = QAction("Settings...", self, triggered=self.open_settings)
-        self.about_action = QAction("&About", self, triggered=self.show_about_dialog)
+        self.about_action = QAction(self.style().standardIcon(QStyle.SP_MessageBoxInformation), "&About", self, triggered=self.show_about_dialog)
         self.generate_prompt_action = QAction(QIcon.fromTheme("document-send"), "🚀 &Generate Final Prompt", self, triggered=self.focus_prompt_tab, enabled=False)
+        self.documentation_action = QAction(self.style().standardIcon(QStyle.SP_DialogHelpButton), "&Documentation", self, triggered=self.show_documentation)
+
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -420,7 +424,9 @@ class ProjectDocumenter(QMainWindow):
         edit_menu.addAction(self.refresh_action)
         edit_menu.addAction(self.toggle_all_action)
         menu_bar.addMenu("&Settings").addAction(self.settings_action)
-        menu_bar.addMenu("&Help").addAction(self.about_action)
+        help_menu = menu_bar.addMenu("&Help") # MODIFIED
+        help_menu.addAction(self.documentation_action) # NEW
+        help_menu.addAction(self.about_action) # MODIFIED
         self.update_recent_projects_menu()
 
     def create_tool_bar(self):
@@ -436,14 +442,22 @@ class ProjectDocumenter(QMainWindow):
         self.recent_projects_menu.clear()
         paths = [p for p in self.config_manager.get_recent_projects() if os.path.isdir(p)]
         for path in paths:
-            # --- FIXED LINE ---
-            # The lambda captures the current 'path' value (p=path) and ignores the
-            # 'checked' boolean argument sent by the triggered signal.
             action = QAction(path, self, triggered=lambda checked=False, p=path: self.load_project(p))
             self.recent_projects_menu.addAction(action)
         self.recent_projects_menu.setEnabled(bool(paths))
 
-    def show_about_dialog(self): QMessageBox.about(self, "About LLM-Sherpa", "<h2>LLM-Sherpa v4.1</h2><p>Refactored with a component-based architecture.</p>")
+    def show_about_dialog(self): 
+        # MODIFIED: Use centralized about text
+        QMessageBox.about(self, f"About {APP_NAME}", ABOUT_TEXT)
+    
+    @Slot()
+    def show_documentation(self):
+        """Creates and shows the non-modal documentation window."""
+        if self.doc_viewer is None or not self.doc_viewer.isVisible():
+            self.doc_viewer = DocumentationViewer(self)
+            self.doc_viewer.show()
+        else:
+            self.doc_viewer.activateWindow()
 
     def _get_full_ui_state(self):
         state = tree_handler.get_tree_state(self)

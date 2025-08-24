@@ -1,12 +1,14 @@
 import os
 import json
+import sys
 
 from PySide6.QtWidgets import (
     QDialog, QCheckBox, QLabel, QDialogButtonBox, QTextEdit,
     QVBoxLayout, QHBoxLayout, QPushButton, QListWidget, QListWidgetItem, QMessageBox,
-    QTabWidget, QWidget
+    QTabWidget, QWidget, QTextBrowser
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 
 class SettingsWindow(QDialog):
     def __init__(self, settings_manager, parent=None):
@@ -115,3 +117,51 @@ class WelcomeDialog(QDialog):
     
     def open_new(self):
         self.selected_path = "OPEN_NEW"; super().accept()
+
+class DocumentationViewer(QDialog):
+    """A non-modal window to display the project's README.md."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("LLM-Sherpa Documentation")
+        self.setGeometry(150, 150, 800, 600)
+
+        layout = QVBoxLayout(self)
+        self.text_browser = QTextBrowser()
+        self.text_browser.setOpenExternalLinks(True)
+        layout.addWidget(self.text_browser)
+
+        self.load_content()
+
+    def load_content(self):
+        try:
+            # Determine the base path (works for script and frozen exe)
+            base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+            # Navigate up one level to the project root from 'sherpa_modules'
+            project_root = os.path.dirname(base_path)
+            readme_path = os.path.join(project_root, 'README.md')
+            
+            if os.path.exists(readme_path):
+                with open(readme_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.text_browser.setMarkdown(content)
+            else:
+                self.show_fallback_link()
+        except Exception as e:
+            self.show_fallback_link(error=str(e))
+    
+    def show_fallback_link(self, error=None):
+        github_url = "https://github.com/VicRejkia/LLM-Sherpa/blob/ui_pyside/README.md"
+        error_message = f"<p><b>Error loading local README.md:</b> {error}</p>" if error else ""
+        
+        fallback_html = f"""
+        <html>
+            <body>
+                <h2>Documentation</h2>
+                <p>The local `README.md` file could not be found.</p>
+                {error_message}
+                <p>You can view the most up-to-date documentation on our GitHub page:</p>
+                <p><a href="{github_url}">{github_url}</a></p>
+            </body>
+        </html>
+        """
+        self.text_browser.setHtml(fallback_html)
