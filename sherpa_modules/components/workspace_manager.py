@@ -11,6 +11,7 @@ class WorkspaceManager(QWidget):
     and Selection Templates. Encapsulates all related state and UI logic.
     """
     content_changed = Signal()
+    template_selected = Signal(str)
 
     def __init__(self, prompt_templates, parent=None):
         super().__init__(parent)
@@ -233,18 +234,19 @@ class WorkspaceManager(QWidget):
 
     @Slot(QListWidgetItem, QListWidgetItem)
     def handle_template_selection_change(self, current, previous):
+        """
+        Emits a dedicated signal when the user selects a new template from the list.
+        The main window will coordinate saving the old state and loading the new one.
+        """
         if self._is_switching_templates or not current:
             return
-        # The main window will handle saving and loading
-        # This signal just indicates a change was requested
-        if previous:
-            self.content_changed.emit() # Ensure state is saved before switch
+
+        # Do nothing if the user clicks the same item again
+        if previous and current.text() == previous.text():
+            return
         
-        new_template_name = current.text()
-        if new_template_name in self.templates:
-            # The main window will fetch the new state and push it back
-            # For now, just emit the general change signal
-            self.content_changed.emit()
+        # Emit the new signal with the name of the template to load
+        self.template_selected.emit(current.text())
 
     @Slot()
     def prompt_and_save_new_template(self):

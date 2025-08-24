@@ -83,31 +83,32 @@ class FileSystemWorker(QObject):
             for node in tree.body:
                 if not self._is_running: return
                 
-                # Check for top-level class definitions
+                # Determine end line for class/function to allow for accurate content extraction
+                end_lineno = node.end_lineno if hasattr(node, 'end_lineno') else node.lineno
+                
                 if isinstance(node, ast.ClassDef):
                     yield {
                         'id': f"{file_rel_path}/{node.name}",
                         'parent_id': file_rel_path,
                         'name': node.name,
                         'type': 'class',
-                        'rel_path': file_rel_path, # Path of the containing file
+                        'rel_path': file_rel_path,
                         'full_path': file_full_path,
                         'start_line': node.lineno,
+                        'end_line': end_lineno
                     }
-
-                # Check for top-level function definitions
                 elif isinstance(node, ast.FunctionDef):
                     yield {
                         'id': f"{file_rel_path}/{node.name}",
                         'parent_id': file_rel_path,
                         'name': node.name,
                         'type': 'function',
-                        'rel_path': file_rel_path, # Path of the containing file
+                        'rel_path': file_rel_path,
                         'full_path': file_full_path,
                         'start_line': node.lineno,
+                        'end_line': end_lineno
                     }
-        except (SyntaxError, UnicodeDecodeError, OSError) as e:
-            # If a file can't be parsed, just ignore its contents and move on
+        except (SyntaxError, UnicodeDecodeError, OSError, ValueError) as e:
             print(f"Warning: Could not parse {file_rel_path}: {e}")
             pass
 
@@ -116,17 +117,22 @@ class FileSystemWorker(QObject):
         Recursively scans a directory. It yields dictionaries for each folder and file.
         For Python files, it delegates to _parse_python_file.
         """
+        # --- FIXED: Corrected settings keys and added comprehensive exclusion logic ---
         include_all = self.settings.get("include_all_files", False)
-        ignored_dirs = set(self.settings.get("ignored_dirs", []))
-        allowed_extensions = set(self.settings.get("allowed_extensions", []))
+        exclude_list = set(self.settings.get("exclude_list", []))
+        exclude_dotfiles = self.settings.get("exclude_dotfiles", True)
+        allowed_extensions = set(self.settings.get("extension_map", {}).keys())
 
         for entry in os.scandir(path):
             if not self._is_running: return
 
+            # --- FIXED: Apply exclusion rules to both files and directories ---
+            if entry.name in exclude_list:
+                continue
+            if exclude_dotfiles and entry.name.startswith('.'):
+                continue
+
             if entry.is_dir():
-                if entry.name in ignored_dirs:
-                    continue
-                
                 dir_full_path = entry.path
                 dir_rel_path = os.path.relpath(dir_full_path, self.project_path).replace(os.sep, '/')
                 parent_rel_path = os.path.dirname(dir_rel_path) or '.'
@@ -139,7 +145,6 @@ class FileSystemWorker(QObject):
                     'rel_path': dir_rel_path,
                     'full_path': dir_full_path,
                 }
-                # Recurse into the subdirectory
                 yield from self._scan_directory(dir_full_path)
 
             elif entry.is_file():
@@ -147,11 +152,9 @@ class FileSystemWorker(QObject):
                 file_rel_path = os.path.relpath(file_full_path, self.project_path).replace(os.sep, '/')
                 file_ext = os.path.splitext(entry.name)[1].lower()
 
-                # Check if it's a Python file to be parsed
                 if file_ext == '.py':
                     yield from self._parse_python_file(file_full_path, file_rel_path)
                 
-                # For all other files, check against settings
                 elif include_all or file_ext in allowed_extensions:
                     parent_rel_path = os.path.dirname(file_rel_path) or '.'
                     yield {

@@ -153,6 +153,8 @@ class ProjectDocumenter(QMainWindow):
         self.project_view.model().itemChanged.connect(self.on_item_changed)
         self.log_view.log_text_edit.textChanged.connect(self._on_content_changed)
         self.workspace_manager.content_changed.connect(self._on_content_changed)
+        self.workspace_manager.template_selected.connect(self.on_template_switch_requested)
+
         self.workspace_manager.btn_add_files_to_table.clicked.connect(self._populate_key_files_table)
         self.workspace_manager.btn_remove_files_from_table.clicked.connect(self._remove_selected_key_files)
         
@@ -214,6 +216,32 @@ class ProjectDocumenter(QMainWindow):
     def _update_prompt_preview(self):
         prompt_content = self._assemble_prompt()
         self.prompt_preview_browser.setText(prompt_content)
+
+    @Slot(str)
+    def on_template_switch_requested(self, new_template_name):
+        """
+        Handles the entire process of switching between selection templates.
+        First, it saves the current UI state to the outgoing template, then it
+        loads the state from the newly selected template.
+        """
+        wm = self.workspace_manager
+
+        # Prevent recursive signals or reloading the same template
+        if wm._is_switching_templates or wm.active_template_name == new_template_name:
+            return
+
+        # 1. Save the current UI state to the *old* active template.
+        # The wm.active_template_name still holds the name of the template we are leaving.
+        self._save_project_state()
+
+        # 2. Get the state data for the new template.
+        if new_template_name in wm.templates:
+            state_to_load = wm.templates[new_template_name]
+            # 3. Load the new state. This will also update wm.active_template_name.
+            self._load_state_from_template(new_template_name, state_to_load)
+        else:
+            QMessageBox.warning(self, "Template Error", f"Could not find data for template '{new_template_name}'.")
+
 
     @Slot()
     def _populate_key_files_table(self):
@@ -290,7 +318,9 @@ class ProjectDocumenter(QMainWindow):
     def load_project(self, path):
         self._is_loading_project = True
         if self.worker_thread and self.worker_thread.isRunning():
-            self.worker.stop(); self.worker_thread.quit(); self.worker_thread.wait(5000)
+            self.worker.stop()
+            self.worker_thread.quit()
+            self.worker_thread.wait(5000)
 
         self.project_path = get_long_path_name(os.path.normpath(path)).replace(os.sep, '/')
         self.setWindowTitle(f"LLM-Sherpa - {os.path.basename(self.project_path)}")
@@ -302,8 +332,8 @@ class ProjectDocumenter(QMainWindow):
         self.config_manager.add_recent_project(self.project_path)
         self.update_recent_projects_menu()
 
-        self.set_ui_enabled(False); self.loading_status_label.setText("Scanning project files...")
-        QApplication.processEvents()
+        self.set_ui_enabled(False)
+        self.loading_status_label.setText("Scanning project files...")
 
         self.worker_thread = QThread(self)
         self.worker = FileSystemWorker(self.project_path, self.settings_manager.settings)
@@ -387,7 +417,10 @@ class ProjectDocumenter(QMainWindow):
         self.recent_projects_menu.clear()
         paths = [p for p in self.config_manager.get_recent_projects() if os.path.isdir(p)]
         for path in paths:
-            action = QAction(path, self, triggered=partial(self.load_project, path))
+            # --- FIXED LINE ---
+            # The lambda captures the current 'path' value (p=path) and ignores the
+            # 'checked' boolean argument sent by the triggered signal.
+            action = QAction(path, self, triggered=lambda checked=False, p=path: self.load_project(p))
             self.recent_projects_menu.addAction(action)
         self.recent_projects_menu.setEnabled(bool(paths))
 

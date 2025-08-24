@@ -1,7 +1,8 @@
 import os
+# --- MODIFIED: Add QThread, QObject, and Signal for background processing ---
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QTreeView, QLabel, QTextBrowser, QStyle
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QFont
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QThread, QObject, Signal
 
 from sherpa_modules import content_utils
 
@@ -12,6 +13,46 @@ try:
     PYGMENTS_AVAILABLE = True
 except ImportError:
     PYGMENTS_AVAILABLE = False
+
+# --- NEW: Worker for asynchronously reading and highlighting files ---
+class FileContentWorker(QObject):
+    """
+    Worker to fetch file content and perform syntax highlighting in a background thread.
+    """
+    # Emits the final content (HTML or plain text) and a boolean indicating if it's HTML
+    result_ready = Signal(str, bool)
+
+    def __init__(self, item_data, settings_manager, pygments_css):
+        super().__init__()
+        self.item_data = item_data
+        self.settings_manager = settings_manager
+        self.pygments_css = pygments_css
+
+    @Slot()
+    def run(self):
+        """
+        Fetches the code from the item, highlights it if possible, and emits the result.
+        """
+        code = content_utils.get_code_from_item(self.item_data)
+        
+        if not code.strip():
+            self.result_ready.emit("<i>(File is empty or contains only whitespace)</i>", True)
+            return
+
+        if PYGMENTS_AVAILABLE:
+            try:
+                ext_map = self.settings_manager.get("extension_map", {})
+                ext = os.path.splitext(self.item_data['full_path'])[1].lower()
+                lexer = get_lexer_by_name(ext_map.get(ext, 'text'))
+            except Exception:
+                lexer = guess_lexer(code)
+            
+            formatter = HtmlFormatter(style='monokai', linenos='table', noclasses=False)
+            html_fragment = highlight(code, lexer, formatter)
+            full_html = f"<html><head><style>{self.pygments_css} body{{background-color:#272822;color:#f8f8f2;}}</style></head><body>{html_fragment}</body></html>"
+            self.result_ready.emit(full_html, True)
+        else:
+            self.result_ready.emit(code, False)
 
 
 class ProjectView(QWidget):
@@ -25,6 +66,10 @@ class ProjectView(QWidget):
         super().__init__(parent)
         self.settings_manager = settings_manager
         self.pygments_css = ""
+
+        self.file_reader_thread = None
+        self.file_reader_worker = None
+
         if PYGMENTS_AVAILABLE:
             formatter = HtmlFormatter(style='monokai')
             self.pygments_css = formatter.get_style_defs('.highlight')
@@ -109,9 +154,20 @@ class ProjectView(QWidget):
         
         self.tree_view.header().resizeSection(0, 400)
 
+    @Slot(str, bool)
+    def _display_code_content(self, content, is_html):
+        """Updates the code preview widget with the fetched content."""
+        if is_html:
+            self.code_preview.setHtml(content)
+        else:
+            self.code_preview.setText(content)
 
     @Slot()
     def on_tree_selection_changed(self, selected, deselected):
+        """
+        Handles selection changes in the tree view by loading file content
+        asynchronously in a background thread to keep the UI responsive.
+        """
         indexes = selected.indexes()
         if not indexes:
             self.code_preview.clear()
@@ -119,22 +175,37 @@ class ProjectView(QWidget):
         
         item = self.tree_model.itemFromIndex(indexes[0])
         item_data = item.data(Qt.UserRole)
+        
+        # Clear preview for folders
         if not item_data or item_data.get('type') == 'folder':
             self.code_preview.clear()
             return
 
-        code = content_utils.get_code_from_item(item_data)
-        if PYGMENTS_AVAILABLE:
-            try:
-                ext_map = self.settings_manager.get("extension_map", {})
-                ext = os.path.splitext(item_data['full_path'])[1].lower()
-                lexer = get_lexer_by_name(ext_map.get(ext, 'text'))
-            except Exception:
-                lexer = guess_lexer(code)
-            
-            formatter = HtmlFormatter(style='monokai', linenos='table', noclasses=False)
-            html_fragment = highlight(code, lexer, formatter)
-            full_html = f"<html><head><style>{self.pygments_css} body{{background-color:#272822;color:#f8f8f2;}}</style></head><body>{html_fragment}</body></html>"
-            self.code_preview.setHtml(full_html)
-        else:
-            self.code_preview.setText(code)
+        # --- Asynchronous Loading Logic ---
+
+        # 1. Stop any previous worker that might still be running
+        if self.file_reader_thread and self.file_reader_thread.isRunning():
+            self.file_reader_thread.quit()
+            self.file_reader_thread.wait()
+
+        # 2. Display a loading message immediately
+        self.code_preview.setText("Loading content...")
+
+        # 3. Set up the new worker and thread
+        self.file_reader_thread = QThread()
+        self.file_reader_worker = FileContentWorker(
+            item_data,
+            self.settings_manager,
+            self.pygments_css
+        )
+        self.file_reader_worker.moveToThread(self.file_reader_thread)
+
+        # 4. Connect signals for communication and cleanup
+        self.file_reader_thread.started.connect(self.file_reader_worker.run)
+        self.file_reader_worker.result_ready.connect(self._display_code_content)
+        self.file_reader_worker.result_ready.connect(self.file_reader_thread.quit)
+        self.file_reader_worker.result_ready.connect(self.file_reader_worker.deleteLater)
+        self.file_reader_thread.finished.connect(self.file_reader_thread.deleteLater)
+
+        # 5. Start the background thread
+        self.file_reader_thread.start()
