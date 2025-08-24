@@ -42,6 +42,11 @@ class ProjectDocumenter(QMainWindow):
         self.worker = None
         self.worker_thread = None
 
+        # --- NEW: Debounce timer for UI updates ---
+        self.update_timer = QTimer(self)
+        self.update_timer.setSingleShot(True)
+        self.update_timer.setInterval(400) # 400ms delay for updates
+
         self.load_prompt_templates()
         self.init_ui()
         self._connect_signals()
@@ -149,16 +154,20 @@ class ProjectDocumenter(QMainWindow):
         self.status_bar.addPermanentWidget(self.token_count_label)
 
     def _connect_signals(self):
-        # Connect signals from components to main window slots
+        # --- MODIFIED: Connect signals to the debounced update request ---
         self.project_view.model().itemChanged.connect(self.on_item_changed)
-        self.log_view.log_text_edit.textChanged.connect(self._on_content_changed)
-        self.workspace_manager.content_changed.connect(self._on_content_changed)
+        self.log_view.log_text_edit.textChanged.connect(self.request_update)
+        self.workspace_manager.content_changed.connect(self.request_update)
         self.workspace_manager.template_selected.connect(self.on_template_switch_requested)
 
         self.workspace_manager.btn_add_files_to_table.clicked.connect(self._populate_key_files_table)
         self.workspace_manager.btn_remove_files_from_table.clicked.connect(self._remove_selected_key_files)
         
         self.token_budget_combo.currentTextChanged.connect(self.update_token_count)
+
+        # --- NEW: Connect timer to the actual update function ---
+        self.update_timer.timeout.connect(self.perform_update)
+
 
     def _assemble_prompt(self):
         if not self.workspace_manager.template_selector_combo.currentText():
@@ -180,8 +189,18 @@ class ProjectDocumenter(QMainWindow):
         prompt_text = re.sub(r"\{\{\w+\}\}", "", prompt_text)
         return re.sub(r'\n\s*\n', '\n\n', prompt_text).strip()
 
+    # --- NEW: Lightweight slot that starts the debouncing timer ---
     @Slot()
-    def _on_content_changed(self):
+    def request_update(self):
+        """Restarts the update timer. Called frequently by UI events."""
+        if self._is_loading_project or self.workspace_manager._is_switching_templates:
+            return
+        self.update_timer.start()
+
+    # --- MODIFIED: Renamed from _on_content_changed. Now called by the timer. ---
+    @Slot()
+    def perform_update(self):
+        """Performs all expensive UI updates. Called infrequently by the timer."""
         if self._is_loading_project or self.workspace_manager._is_switching_templates:
             return
         self.update_token_count()
@@ -276,10 +295,10 @@ class ProjectDocumenter(QMainWindow):
 
     def update_token_count(self):
         prompt_chars = len(self._assemble_prompt())
-        log_chars = len(self.log_view.toPlainText())
-        desc_chars = len(self.workspace_manager.project_description_text_edit.toPlainText())
-        code_chars = sum(len(item['content']) for item in content_utils.get_checked_content(self))
-        estimated_tokens = int((prompt_chars + log_chars + desc_chars + code_chars) / 4)
+        # Use the same function that builds the markdown preview for an accurate count
+        markdown_chars = len(actions.assemble_codebase_markdown(self))
+        
+        estimated_tokens = int((prompt_chars + markdown_chars) / 4)
         self.token_count_label.setText(f"Size: ~{estimated_tokens:,} tokens")
 
         budgets = self.settings_manager.get("llm_token_budgets", {})
@@ -366,7 +385,7 @@ class ProjectDocumenter(QMainWindow):
         if self.project_path and self.settings_manager.get("restore_tree_selection"):
             self._restore_project_state()
         self._is_loading_project = False
-        self._on_content_changed()
+        self.perform_update() # Perform an initial update immediately
 
     def set_ui_enabled(self, enabled):
         is_project_loaded = bool(self.project_path)
@@ -431,6 +450,7 @@ class ProjectDocumenter(QMainWindow):
         workspace_state = self.workspace_manager.get_full_ui_state()
         state.update(workspace_state)
         state["logs"] = self.log_view.toPlainText()
+        state["token_budget"] = self.token_budget_combo.currentText()
         return state
 
     def _load_state_from_template(self, template_name, state_data):
@@ -440,10 +460,11 @@ class ProjectDocumenter(QMainWindow):
             tree_handler.restore_tree_state(self, state=state_data)
             self.log_view.setPlainText(state_data.get("logs", ""))
             self.workspace_manager.load_state(state_data, template_name)
+            self.token_budget_combo.setCurrentText(state_data.get("token_budget", "No Budget"))
         
         QApplication.processEvents() # Allow UI to update before finishing
         self.workspace_manager._is_switching_templates = False
-        self._on_content_changed()
+        self.perform_update() # Update immediately after loading state
 
     def _restore_project_state(self):
         project_data = self.config_manager.get("tree_states", {}).get(self.project_path, {})
@@ -455,23 +476,25 @@ class ProjectDocumenter(QMainWindow):
             return
 
         wm = self.workspace_manager
-        active_template = wm.template_list_widget.currentItem()
-        if active_template:
-            wm.active_template_name = active_template.text()
         
-        # Ensure new templates are initialized before saving
-        if wm.active_template_name not in wm.templates:
+        # --- FIXED: Do not read the current selection from the widget here. ---
+        # The wm.active_template_name is the source of truth and is managed
+        # correctly by the template switching and creation logic.
+        
+        # Ensure the active template exists in the dictionary before saving
+        if wm.active_template_name and wm.active_template_name not in wm.templates:
             wm.templates[wm.active_template_name] = {}
         
         # Get the full state and save it to the active template
-        current_state = self._get_full_ui_state()
-        wm.templates[wm.active_template_name] = current_state
+        if wm.active_template_name:
+            current_state = self._get_full_ui_state()
+            wm.templates[wm.active_template_name] = current_state
         
-        # Save all templates for the project back to the config
-        tree_states = self.config_manager.get("tree_states", {})
-        project_data = {"last_active_template": wm.active_template_name, "templates": wm.templates}
-        tree_states[self.project_path] = project_data
-        self.config_manager.set("tree_states", tree_states)
+            # Save all templates for the project back to the config
+            tree_states = self.config_manager.get("tree_states", {})
+            project_data = {"last_active_template": wm.active_template_name, "templates": wm.templates}
+            tree_states[self.project_path] = project_data
+            self.config_manager.set("tree_states", tree_states)
 
     def closeEvent(self, event):
         if self.worker_thread and self.worker_thread.isRunning():

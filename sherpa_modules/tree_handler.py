@@ -115,4 +115,5 @@ def on_item_changed(main_window, item):
     
     main_window._is_updating_checks = False
     
-    main_window._on_content_changed()
+    # --- MODIFIED: Call the new debounced update slot ---
+    main_window.request_update()

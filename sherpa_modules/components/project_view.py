@@ -162,6 +162,14 @@ class ProjectView(QWidget):
         else:
             self.code_preview.setText(content)
 
+    # --- NEW ---
+    # This new slot safely clears the reference to the thread after it's finished.
+    @Slot()
+    def _on_file_reader_finished(self):
+        """Slot to nullify thread and worker references after completion."""
+        self.file_reader_thread = None
+        self.file_reader_worker = None
+
     @Slot()
     def on_tree_selection_changed(self, selected, deselected):
         """
@@ -184,6 +192,7 @@ class ProjectView(QWidget):
         # --- Asynchronous Loading Logic ---
 
         # 1. Stop any previous worker that might still be running
+        # This check is now safe because the reference is cleared on thread finish.
         if self.file_reader_thread and self.file_reader_thread.isRunning():
             self.file_reader_thread.quit()
             self.file_reader_thread.wait()
@@ -206,6 +215,9 @@ class ProjectView(QWidget):
         self.file_reader_worker.result_ready.connect(self.file_reader_thread.quit)
         self.file_reader_worker.result_ready.connect(self.file_reader_worker.deleteLater)
         self.file_reader_thread.finished.connect(self.file_reader_thread.deleteLater)
+        # --- NEW ---
+        # Connect the finished signal to our new cleanup slot.
+        self.file_reader_thread.finished.connect(self._on_file_reader_finished)
 
         # 5. Start the background thread
         self.file_reader_thread.start()

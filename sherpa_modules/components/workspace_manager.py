@@ -174,6 +174,7 @@ class WorkspaceManager(QWidget):
         return {
             "component_roles": self.get_component_roles(),
             "project_description": self.project_description_text_edit.toPlainText(),
+            "preamble_checked": self.preamble_checkbox.isChecked(),
             "logs": "", # Logs are managed by a different component
             "prompt_studio": prompt_studio_state
         }
@@ -182,6 +183,7 @@ class WorkspaceManager(QWidget):
         self._is_switching_templates = True
         
         self.project_description_text_edit.setPlainText(state_data.get("project_description", ""))
+        self.preamble_checkbox.setChecked(state_data.get("preamble_checked", True)) 
         roles = state_data.get("component_roles", {})
         self.key_files_table.setRowCount(0)
         for file_path, role in roles.items():
